@@ -1,0 +1,25 @@
+[package]
+name = "byte-cursor"
+version = "0.1.1"
+edition = "2024"
+description = "Position-tracking cursor over a byte slice — pure Rust, 0 deps, no_std + alloc-not-required. peek/advance/peek_at + line/col tracking + take_while/skip_while predicates. Lifted from grpcx-pb's lexer + grpcx-ws's HTTP/1 extension parser."
+license = "Apache-2.0 OR MIT"
+repository = "https://github.com/goliajp/stones"
+homepage = "https://github.com/goliajp/stones"
+documentation = "https://docs.rs/byte-cursor"
+authors = ["GOLIA K.K."]
+keywords = ["cursor", "parser", "scanner", "no-std", "byte"]
+categories = ["parser-implementations", "no-std", "no-std::no-alloc"]
+readme = "README.md"
+
+[lints]
+workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+criterion = { workspace = true }
+
+[[bench]]
+name = "throughput"
+harness = false

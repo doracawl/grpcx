@@ -1,0 +1,23 @@
+[package]
+name = "stones-comparators"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Cross-language perf comparator harness for stones. Bench-only: depends on community crates (sha1, base64) strictly for head-to-head numbers; never published, never a dependency of any stone."
+license = "Apache-2.0 OR MIT"
+
+[lints]
+workspace = true
+
+[dependencies]
+base64-rfc4648 = { path = "../../../crates/base64-rfc4648" }
+sha1-rfc3174 = { path = "../../../crates/sha1-rfc3174" }
+# Community comparators — same policy as the criterion
+# benches: allowed here because this crate is publish =
+# false and exists only to produce comparison numbers.
+sha1 = { workspace = true }
+base64 = { workspace = true }
+
+[[bin]]
+name = "bench-stones"
+path = "src/main.rs"

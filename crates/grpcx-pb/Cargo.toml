@@ -20,13 +20,10 @@ readme = "README.md"
 workspace = true
 
 [dependencies]
-# In-house stones — cross-workspace path dep to
-# ../../../stones/crates/byte-cursor. 0-runtime-dep
+# In-house stone (workspace-local). 0-runtime-dep
 # pure-Rust `no_std + alloc`. Replaces the inline `Cursor`
 # struct that used to live at the bottom of src/lexer.rs.
-# See ../../docs/DEPS_AUDIT.md for the in-house stones
-# policy.
-byte-cursor = { path = "../../../stones/crates/byte-cursor", version = "0.1.1" }
+byte-cursor = { path = "../byte-cursor", version = "0.1.1" }
 
 # L8 itself has no other runtime deps. The dep-direction
 # rule in ../../ARCHITECTURE.md still applies: lower-layer

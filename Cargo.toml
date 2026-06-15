@@ -4,6 +4,14 @@ version = "1.4.0"
 [workspace]
 resolver = "2"
 members = [
+    # Stones — 0-runtime-dep infrastructure crates, independently
+    # publishable. Lifted out of the grpcx-* stack per the
+    # stone/steel/cement methodology (see _dev/ARCHITECTURE.md).
+    "crates/base64-rfc4648",
+    "crates/byte-cursor",
+    "crates/http1-syntax",
+    "crates/sha1-rfc3174",
+    # grpcx-* layered stack.
     "crates/grpcx-io",
     "crates/grpcx-rt",
     "crates/grpcx-crypto",
@@ -17,7 +25,9 @@ members = [
     "crates/grpcx-pb-derive",
     "crates/grpcx-ws",
     "crates/grpcx",
+    # Comparator harnesses (bench-only, publish = false).
     "comparators/tonic-grpcx",
+    "comparators/stones/rust",
 ]
 # cargo-fuzz's per-crate `fuzz/` subdir is a stand-alone package, not a
 # workspace member (it uses nightly + libfuzzer-sys + has its own lints).
@@ -55,6 +65,11 @@ tonic = { version = "0.12", default-features = false, features = ["transport", "
 prost = { version = "0.13", default-features = false, features = ["std", "prost-derive"] }
 tonic-build = { version = "0.12", default-features = false, features = ["prost"] }
 protox = "0.7"
+# Stones bench comparators — community baselines used by
+# the stones (sha1-rfc3174 / base64-rfc4648) head-to-head
+# benches. Forbidden in `src/` and non-bench `tests/`.
+sha1 = { version = "0.10", default-features = false }
+base64 = { version = "0.22", default-features = false, features = ["alloc"] }
 # DOCUMENTED, TIME-BOUNDED 0-DEP EXCEPTION — the only non-grpcx-*
 # runtime dep allowed inside `src/`. Lives only in `grpcx-crypto`.
 # See DEPS_AUDIT.md § L3 crypto interim wrapper for the retire-when

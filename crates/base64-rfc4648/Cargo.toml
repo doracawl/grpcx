@@ -1,0 +1,29 @@
+[package]
+name = "base64-rfc4648"
+version = "0.2.0"
+edition = "2024"
+description = "RFC 4648 base64 — pure Rust, 0 deps, no_std + alloc, spec-anchored. Standard alphabet, URL-safe alphabet, encode + decode + padding-strict + padding-tolerant modes. Scalar hot paths tuned past the common SIMD-free comparators (u64 lanes, pre-shifted decode tables)."
+license = "Apache-2.0 OR MIT"
+repository = "https://github.com/goliajp/stones"
+homepage = "https://github.com/goliajp/stones"
+documentation = "https://docs.rs/base64-rfc4648"
+authors = ["GOLIA K.K."]
+keywords = ["base64", "rfc4648", "no-std", "encode", "decode"]
+categories = ["encoding", "no-std", "no-std::no-alloc"]
+readme = "README.md"
+
+[lints]
+workspace = true
+
+[dependencies]
+# Zero external runtime deps. RFC 4648 is a self-contained
+# spec; the implementation needs nothing beyond core +
+# alloc.
+
+[dev-dependencies]
+criterion = { workspace = true }
+base64 = { workspace = true }
+
+[[bench]]
+name = "throughput"
+harness = false

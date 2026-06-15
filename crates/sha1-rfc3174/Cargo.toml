@@ -1,0 +1,29 @@
+[package]
+name = "sha1-rfc3174"
+version = "0.2.0"
+edition = "2024"
+description = "RFC 3174 SHA-1 — pure Rust, 0 deps, no_std + alloc, spec-anchored. One-shot + incremental Update API. AArch64 SHA crypto-extension hardware path (software-pipelined), portable scalar fallback. SHA-1 is cryptographically broken; use only for non-security purposes (e.g. RFC 6455 WebSocket handshake)."
+license = "Apache-2.0 OR MIT"
+repository = "https://github.com/goliajp/stones"
+homepage = "https://github.com/goliajp/stones"
+documentation = "https://docs.rs/sha1-rfc3174"
+authors = ["GOLIA K.K."]
+keywords = ["sha1", "rfc3174", "no-std", "hash", "legacy"]
+categories = ["cryptography", "no-std", "no-std::no-alloc"]
+readme = "README.md"
+
+[lints]
+workspace = true
+
+[dependencies]
+# Zero external runtime deps. SHA-1 is a self-contained
+# block cipher; the impl needs nothing beyond core +
+# alloc.
+
+[dev-dependencies]
+criterion = { workspace = true }
+sha1 = { workspace = true }
+
+[[bench]]
+name = "throughput"
+harness = false

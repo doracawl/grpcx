@@ -20,18 +20,16 @@ readme = "README.md"
 workspace = true
 
 [dependencies]
-# In-house stones — cross-workspace path deps to
-# ../../../stones/crates/*. Both are 0-runtime-dep pure-
+# In-house stones (workspace-local). 0-runtime-dep pure-
 # Rust `no_std + alloc` crates extracted from the inline
 # helpers that used to live in src/sha1.rs + src/base64.rs.
 # The path + version pair lets the same Cargo.toml drive
-# local dev (`path`) and a future crates.io publish
-# (`version`). See ../../docs/DEPS_AUDIT.md for the in-
-# house stones policy.
-base64-rfc4648 = { path = "../../../stones/crates/base64-rfc4648", version = "0.2.0" }
-byte-cursor = { path = "../../../stones/crates/byte-cursor", version = "0.1.1" }
-http1-syntax = { path = "../../../stones/crates/http1-syntax", version = "0.1.0" }
-sha1-rfc3174 = { path = "../../../stones/crates/sha1-rfc3174", version = "0.2.0" }
+# workspace-local dev (`path`) and a future crates.io
+# publish (`version`).
+base64-rfc4648 = { path = "../base64-rfc4648", version = "0.2.0" }
+byte-cursor = { path = "../byte-cursor", version = "0.1.1" }
+http1-syntax = { path = "../http1-syntax", version = "0.1.0" }
+sha1-rfc3174 = { path = "../sha1-rfc3174", version = "0.2.0" }
 
 # L9 itself carries no other runtime deps. The dep-
 # direction rule in ../../ARCHITECTURE.md still applies:
