@@ -1,0 +1,23 @@
+[package]
+name = "grpcx-h2"
+# Literal version — own cadence, same as every layer.
+version = "0.3.0"
+edition = "2024"
+description = "HTTP/2 framing + HPACK for the grpcx stack — the interop bridge to the existing gRPC ecosystem (charter revision 2026-06-11). h2 (TLS) + h2c (cleartext). No hyper, no h2 crate."
+license = "Apache-2.0 OR MIT"
+repository = "https://github.com/goliajp/grpcx"
+homepage = "https://github.com/goliajp/grpcx"
+documentation = "https://docs.rs/grpcx-h2"
+authors = ["GOLIA K.K."]
+keywords = ["http2", "hpack", "grpc", "no-std", "h2-replacement"]
+categories = ["network-programming", "no-std", "parser-implementations"]
+readme = "README.md"
+
+[lints]
+workspace = true
+
+[dependencies]
+# L3 only (TLS lands at the h2-over-TLS step; h2c needs
+# nothing). Dep-direction rule per ARCHITECTURE.md.
+
+[dev-dependencies]

@@ -1,0 +1,39 @@
+[package]
+name = "grpcx-pb"
+# Literal, NOT `version.workspace = true`. L8 runs its own v0.x → v1.0
+# cadence; the workspace package version (1.1.0) tracks L1's released
+# surface. grpcx-pb joins the project-wide `v8.x` label only when
+# L8 closes. See ../../docs/v8-scope.md.
+version = "1.5.0"
+edition = "2024"
+description = "`.proto` editions 2023+ importer for the grpcx stack. Translates `.proto` schemas into L7 IDL + ships a runtime wire-format shim. No libc, no serde, no prost, no protoc."
+license = "Apache-2.0 OR MIT"
+repository = "https://github.com/goliajp/grpcx"
+homepage = "https://github.com/goliajp/grpcx"
+documentation = "https://docs.rs/grpcx-pb"
+authors = ["GOLIA K.K."]
+keywords = ["protobuf", "editions", "importer", "codegen", "prost-replacement"]
+categories = ["encoding", "no-std", "parser-implementations"]
+readme = "README.md"
+
+[lints]
+workspace = true
+
+[dependencies]
+# In-house stones — cross-workspace path dep to
+# ../../../stones/crates/byte-cursor. 0-runtime-dep
+# pure-Rust `no_std + alloc`. Replaces the inline `Cursor`
+# struct that used to live at the bottom of src/lexer.rs.
+# See ../../docs/DEPS_AUDIT.md for the in-house stones
+# policy.
+byte-cursor = { path = "../../../stones/crates/byte-cursor", version = "0.1.1" }
+
+# L8 itself has no other runtime deps. The dep-direction
+# rule in ../../ARCHITECTURE.md still applies: lower-layer
+# `grpcx-*` only; stones are exempt (0-dep infrastructure).
+
+[dev-dependencies]
+# v0.1 has no dev-deps. v0.7 will add `grpcx-idl` via
+# `path = "../grpcx-idl"` for the runtime wire-format shim
+# round-trip KATs; `compare_prost` head-to-head harness
+# (deferred to v1.x) lives under `benches/` then.

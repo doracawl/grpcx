@@ -1,0 +1,19 @@
+[package]
+name = "grpcx-idl-derive"
+version = "1.0.0"
+edition = "2024"
+description = "#[derive(GrpcxIdl)] proc-macro — auto-generates Archive/Serialize/Deserialize impls for user structs + enums, matching the grpcx-idl wire format."
+license = "Apache-2.0 OR MIT"
+repository = "https://github.com/goliajp/grpcx"
+authors = ["GOLIA K.K."]
+
+[lib]
+proc-macro = true
+
+[lints]
+workspace = true
+
+[dependencies]
+syn = { workspace = true }
+quote = { workspace = true }
+proc-macro2 = { workspace = true }

@@ -1,0 +1,93 @@
+name: bench
+
+# GH-hosted runners are too jittery for µs-scale benches. This workflow
+# does NOT run benches inside GitHub's runners. Instead it acts as a
+# remote-trigger / dispatch helper for the lab's own benchmark hosts
+# (lx64 = Linux, freebsd-vm = FreeBSD KVM guest on lx64). The actual
+# runs happen on those hosts via SSH (the operator may also dispatch
+# manually with `ssh lx64 'cargo bench'`).
+#
+# v0.9 status: scaffold only. Real automation lands once self-hosted
+# runners are configured (v0.10+ task). Today this workflow is
+# documentation: it states the commands the operator runs by hand,
+# and prints them on workflow_dispatch so a maintainer can copy them.
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Which bench host to dispatch to'
+        required: true
+        type: choice
+        options:
+          - lx64-linux
+          - freebsd-vm
+          - mac-host-local
+          - all
+      bench:
+        description: 'Which bench to run (or "all")'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - compare_mio
+          - compare_uring
+          - all
+      mode:
+        description: 'criterion sample mode'
+        required: true
+        default: 'sustained'
+        type: choice
+        options:
+          - sustained
+          - quick
+
+jobs:
+  print-commands:
+    name: print bench commands
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Echo commands for ${{ inputs.target }} / ${{ inputs.bench }} / ${{ inputs.mode }}
+        run: |
+          echo "Manual dispatch — run these commands on the chosen bench host(s):"
+          echo ""
+
+          MODE_FLAG=""
+          if [ "${{ inputs.mode }}" = "quick" ]; then
+            MODE_FLAG=" -- --quick"
+          fi
+
+          if [ "${{ inputs.target }}" = "lx64-linux" ] || [ "${{ inputs.target }}" = "all" ]; then
+            echo "# Linux (lx64) — Debian 13 / i7-10700K"
+            if [ "${{ inputs.bench }}" = "compare_mio" ] || [ "${{ inputs.bench }}" = "all" ]; then
+              echo "ssh lx64 'cd ~/grpcx-bench-v0.4 && cargo bench --bench compare_mio${MODE_FLAG}'"
+            fi
+            if [ "${{ inputs.bench }}" = "compare_uring" ] || [ "${{ inputs.bench }}" = "all" ]; then
+              echo "ssh lx64 'cd ~/grpcx-bench-v0.4 && cargo bench --bench compare_uring${MODE_FLAG}'"
+            fi
+            echo ""
+          fi
+
+          if [ "${{ inputs.target }}" = "freebsd-vm" ] || [ "${{ inputs.target }}" = "all" ]; then
+            echo "# FreeBSD VM (KVM on lx64) — FreeBSD 15.0-RELEASE"
+            if [ "${{ inputs.bench }}" = "compare_mio" ] || [ "${{ inputs.bench }}" = "all" ]; then
+              echo "ssh freebsd-vm 'cd ~/grpcx-bench-v0.7 && cargo bench --bench compare_mio${MODE_FLAG}'"
+            fi
+            if [ "${{ inputs.bench }}" = "compare_uring" ] || [ "${{ inputs.bench }}" = "all" ]; then
+              echo "# compare_uring is Linux-only; skipped for FreeBSD"
+            fi
+            echo ""
+          fi
+
+          if [ "${{ inputs.target }}" = "mac-host-local" ] || [ "${{ inputs.target }}" = "all" ]; then
+            echo "# Darwin (mac dev host) — quiet machine required for sub-percent confidence"
+            if [ "${{ inputs.bench }}" = "compare_mio" ] || [ "${{ inputs.bench }}" = "all" ]; then
+              echo "cd \$GRPCX_ROOT && CARGO_TARGET_DIR=./target-grpcx-v0.5 cargo bench --bench compare_mio${MODE_FLAG}"
+            fi
+            echo ""
+          fi
+
+          echo "After running, copy criterion stdout into PERFORMANCE.md +"
+          echo "BUDGETS.md observed-column rows, plus a one-line commit note."

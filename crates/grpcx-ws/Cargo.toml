@@ -1,0 +1,45 @@
+[package]
+name = "grpcx-ws"
+# Literal, NOT `version.workspace = true`. L9 runs its own v0.x → v1.0
+# cadence; the workspace package version (1.1.0) tracks L1's released
+# surface. grpcx-ws joins the project-wide `v9.x` label only when
+# L9 closes. See ../../docs/v9-scope.md.
+version = "1.1.0"
+edition = "2024"
+description = "RFC 6455 WebSocket framing + HTTP/1.1 upgrade handshake for the grpcx stack. No libc, no async, no IO — pure framing layer."
+license = "Apache-2.0 OR MIT"
+repository = "https://github.com/goliajp/grpcx"
+homepage = "https://github.com/goliajp/grpcx"
+documentation = "https://docs.rs/grpcx-ws"
+authors = ["GOLIA K.K."]
+keywords = ["websocket", "rfc6455", "framing", "no-std", "tungstenite-replacement"]
+categories = ["network-programming", "no-std", "parser-implementations"]
+readme = "README.md"
+
+[lints]
+workspace = true
+
+[dependencies]
+# In-house stones — cross-workspace path deps to
+# ../../../stones/crates/*. Both are 0-runtime-dep pure-
+# Rust `no_std + alloc` crates extracted from the inline
+# helpers that used to live in src/sha1.rs + src/base64.rs.
+# The path + version pair lets the same Cargo.toml drive
+# local dev (`path`) and a future crates.io publish
+# (`version`). See ../../docs/DEPS_AUDIT.md for the in-
+# house stones policy.
+base64-rfc4648 = { path = "../../../stones/crates/base64-rfc4648", version = "0.2.0" }
+byte-cursor = { path = "../../../stones/crates/byte-cursor", version = "0.1.1" }
+http1-syntax = { path = "../../../stones/crates/http1-syntax", version = "0.1.0" }
+sha1-rfc3174 = { path = "../../../stones/crates/sha1-rfc3174", version = "0.2.0" }
+
+# L9 itself carries no other runtime deps. The dep-
+# direction rule in ../../ARCHITECTURE.md still applies:
+# lower-layer `grpcx-*` only; stones are exempt
+# (0-dep infrastructure).
+
+[dev-dependencies]
+# v0.1 has no dev-deps. v0.7 may add `tungstenite` via
+# `[workspace.dependencies]` for the comparison-only
+# `benches/compare_tungstenite.rs` harness (deferred to
+# v9.1 / v1.x per the L1-L8 charter).

@@ -1,0 +1,49 @@
+[package]
+name = "grpcx-crypto"
+# L3 closed at v1.0 on 2026-06-07 (v0.7 close-out, see
+# ../../REFACTOR-v3-v0.7-close-out.md). Still a literal, NOT
+# `version.workspace = true`: grpcx-io, grpcx-rt and grpcx-crypto
+# share semver stability at v1.x but their per-crate release
+# cadences are independent — each may ship a `1.x.y` independently
+# of the others.
+version = "1.3.1"
+edition = "2024"
+description = "Crypto + TLS 1.3 for the grpcx stack — interim form wraps rustls + ring, future form is the self-implementation. The constant-time API surface a hand-rolled impl would keep; rustls hidden behind it."
+license = "Apache-2.0 OR MIT"
+repository = "https://github.com/goliajp/grpcx"
+homepage = "https://github.com/goliajp/grpcx"
+documentation = "https://docs.rs/grpcx-crypto"
+authors = ["GOLIA K.K."]
+keywords = ["crypto", "tls", "aead", "x25519", "ed25519"]
+categories = ["cryptography", "no-std", "network-programming"]
+readme = "README.md"
+
+[lints]
+workspace = true
+
+[dependencies]
+# Lower-layer grpcx-* only (dep direction rule, ARCHITECTURE.md).
+# grpcx-io is L1; grpcx-rt is L2; grpcx-crypto is L3.
+grpcx-io = { path = "../grpcx-io" }
+grpcx-rt = { path = "../grpcx-rt" }
+# Documented external exception — see DEPS_AUDIT.md § L3 crypto
+# interim wrapper. The only non-grpcx-* runtime dep in the workspace.
+# Retire-when: external cryptographer review window opens AND
+# self-impl passes BoGo + NIST CAVP. The `ring` feature pulls in
+# *ring* as the crypto provider; `std` is required by rustls.
+rustls = { workspace = true }
+ring = { workspace = true }
+
+[dev-dependencies]
+# Test-only. `loopback_tls13` mints a self-signed cert in-memory.
+# Same exception class as `criterion` / `mio` / `tokio` in the
+# workspace deps block.
+rcgen = { workspace = true }
+# Bench-only — `compare_rustls.rs` head-to-head harness vs raw
+# rustls (v0.7). rustls is already a runtime dep; `criterion` is the
+# bench harness.
+criterion = { workspace = true }
+
+[[bench]]
+name = "compare_rustls"
+harness = false

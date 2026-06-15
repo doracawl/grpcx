@@ -1,0 +1,23 @@
+// Echo workload for the v10.0 e2e comparison harness.
+syntax = "proto3";
+
+package echo.v1;
+
+message PingRequest { bytes payload = 1; }
+message PingResponse { bytes payload = 1; }
+
+// Stage B presence kernel wire-compat probe (charter
+// 2026-06-13): encoded by BOTH prost (tonic-build) and
+// grpcx-pb (proto_inline!) and byte-compared in interop.
+message PresenceProbe {
+  optional int32 oi = 1;
+  optional string os = 2;
+  optional bool ob = 3;
+  int32 plain = 4;
+}
+
+service Echo {
+  rpc Ping(PingRequest) returns (PingResponse);
+  rpc Burst(PingRequest) returns (stream PingResponse);
+  rpc Exchange(stream PingRequest) returns (stream PingResponse);
+}

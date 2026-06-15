@@ -1,0 +1,33 @@
+[package]
+name = "grpcx-idl"
+# Literal, NOT `version.workspace = true`. L7 runs its own v0.x → v1.0
+# cadence; the workspace package version (1.1.0) tracks L1's released
+# surface. grpcx-idl joins the project-wide `v7.x` label only when
+# L7 closes. See ../../docs/v7-scope.md.
+version = "1.0.0"
+edition = "2024"
+description = "grpcx's own IDL + zero-copy wire format. A rkyv / Cap'n Proto cost-class replacement. No libc, no serde, no rkyv, no capnp."
+license = "Apache-2.0 OR MIT"
+repository = "https://github.com/goliajp/grpcx"
+homepage = "https://github.com/goliajp/grpcx"
+documentation = "https://docs.rs/grpcx-idl"
+authors = ["GOLIA K.K."]
+keywords = ["serialization", "zero-copy", "idl", "rkyv-replacement", "capnp-replacement"]
+categories = ["encoding", "no-std"]
+readme = "README.md"
+
+[lints]
+workspace = true
+
+[dependencies]
+# L7 is a pure-codec layer — no L1-L6 deps. The crate compiles
+# `no_std + alloc`. The dep direction rule in
+# ../../ARCHITECTURE.md still applies: lower-layer `grpcx-*`
+# only if any; L7 has none.
+
+[dev-dependencies]
+# v0.6 derive-macro KAT (`tests/kat_derive_*.rs`). The proc-
+# macro crate is compile-time-only — it doesn't end up in the
+# runtime binary, so the "no external runtime deps" charter
+# is preserved.
+grpcx-idl-derive = { path = "../grpcx-idl-derive" }

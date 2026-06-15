@@ -1,0 +1,94 @@
+[package]
+name = "grpcx"
+# Literal, NOT `version.workspace = true`. L10 runs its own v0.x → v1.0
+# cadence; the workspace package version (1.1.0) tracks L1's released
+# surface. grpcx joins the project-wide `v10.x` label only when L10
+# closes. See ../../docs/v10-scope.md.
+version = "0.25.0"
+edition = "2024"
+description = "gRPC core for the grpcx stack — service trait + client/server runtime over HTTP/3 (grpcx/h3), WebSocket (grpcx/ws-mux), cleartext HTTP/2 (h2c, the tonic/grpc-go interop bridge), and raw-TCP mux (grpcx/tcp-mux, bare-metal) transports. No tonic, no prost, no hyper."
+license = "Apache-2.0 OR MIT"
+repository = "https://github.com/goliajp/grpcx"
+homepage = "https://github.com/goliajp/grpcx"
+documentation = "https://docs.rs/grpcx"
+authors = ["GOLIA K.K."]
+keywords = ["grpc", "rpc", "http3", "websocket", "tonic-replacement"]
+categories = ["network-programming", "no-std"]
+readme = "README.md"
+
+[lints]
+workspace = true
+
+[features]
+# The H/3 transport edge (v0.3+). Pulls L3 (TLS) + L4
+# (QUIC) + L5 (HTTP/3) and requires std (the lower layers
+# build on rustls). Without it the crate stays
+# `no_std + alloc` — just the ADTs + wire codecs, which is
+# what L8's codegen targets in firmware contexts.
+default = [
+    "transport-h3",
+    "transport-ws-mux",
+    "transport-h2",
+    "transport-h2-tls",
+    "transport-tcp-mux",
+]
+transport-h3 = ["dep:grpcx-crypto", "dep:grpcx-quic", "dep:grpcx-h3", "dep:grpcx-io", "dep:grpcx-rt"]
+# The WebSocket-multiplex fallback transport (v0.6+).
+# Pure `no_std + alloc` — pulls only L9.
+transport-ws-mux = ["dep:grpcx-ws", "dep:grpcx-io", "dep:grpcx-rt"]
+# The HTTP/2 interop bridge (charter 2026-06-11). h2c
+# (cleartext) needs no TLS dep; L1 rides along for the
+# reactor idle park on `TcpTransport`.
+transport-h2 = ["dep:grpcx-h2", "dep:grpcx-io", "dep:grpcx-rt"]
+# h2 over TLS (T4) — the L3 byte-stream TLS wrap
+# (`TlsTransport`) + `connect_h2` / `listen_h2`. Split
+# from `transport-h2` so cleartext-only consumers skip
+# the crypto dep.
+transport-h2-tls = ["transport-h2", "dep:grpcx-crypto"]
+# Bare-metal: the ws-mux frame grammar over raw TCP with
+# u32 length-prefixed records (T7) — no TLS, no HTTP, no
+# handshake. The mux codec is pure alloc; L1 rides along
+# for the reactor idle park on `TcpTransport`.
+transport-tcp-mux = ["dep:grpcx-io", "dep:grpcx-rt"]
+
+[dependencies]
+# Transport edges — optional, see [features]. The dep
+# direction rule in ../../ARCHITECTURE.md applies:
+# lower-layer `grpcx-*` only. grpcx-wt (L6, browser
+# WebTransport) is a v1.x edge; the grpcx-pb (L8) codegen
+# edge stays out of L10 — codegen consumers depend on
+# both crates directly.
+grpcx-crypto = { path = "../grpcx-crypto", optional = true }
+grpcx-quic = { path = "../grpcx-quic", optional = true }
+grpcx-h3 = { path = "../grpcx-h3", version = "1.3.0", optional = true }
+grpcx-ws = { path = "../grpcx-ws", version = "1.1.0", optional = true }
+grpcx-h2 = { path = "../grpcx-h2", version = "0.3.0", optional = true }
+
+# L2: the multi-thread Runtime (reactor driver +
+# work-stealing workers + readable/timeout primitives)
+# backing the threaded TCP serve loop (h2c / tcp-mux /
+# h2-TLS servers).
+grpcx-rt = { path = "../grpcx-rt", version = "1.0.0", optional = true }
+
+# L1: the reactor idle park (`FdParker` — kqueue / epoll
+# via `Poll`) for every socket transport, plus the Darwin
+# batch-datagram syscalls (sendmsg_x/recvmsg_x) for
+# UdpTransport's bulk path. Target-gated to the platforms
+# with a wired selector backend: others keep the
+# yield-once trait default. Rides every socket-transport
+# feature (h3 / h2 / tcp-mux).
+[target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "ios", target_os = "freebsd"))'.dependencies]
+grpcx-io = { path = "../grpcx-io", version = "1.4.0", optional = true }
+
+[dev-dependencies]
+# Loopback e2e tests mint a self-signed cert. Same
+# bench/test-only exception class as L3/L5 (see
+# ../../DEPS_AUDIT.md).
+rcgen = { workspace = true }
+# The proto!-macro e2e (generated typed stubs over a real
+# loopback RPC). In-workspace crates — the layer-direction
+# rule allows dev-deps upward freely.
+grpcx-pb = { path = "../grpcx-pb" }
+grpcx-pb-derive = { path = "../grpcx-pb-derive" }
+# v0.7 adds `tonic` for the gating e2e comparison harness
+# (charter upgraded 2026-06-10 — see docs/v10-scope.md).

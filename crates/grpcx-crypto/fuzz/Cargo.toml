@@ -1,0 +1,38 @@
+[package]
+name = "grpcx-crypto-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[workspace]
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+rcgen = { version = "0.13", default-features = false, features = ["ring", "pem"] }
+
+[dependencies.grpcx-crypto]
+path = ".."
+
+[[bin]]
+name = "aead_open"
+path = "fuzz_targets/aead_open.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "hkdf_expand_label"
+path = "fuzz_targets/hkdf_expand_label.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tls_handshake_feed"
+path = "fuzz_targets/tls_handshake_feed.rs"
+test = false
+doc = false
+bench = false

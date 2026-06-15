@@ -1,0 +1,39 @@
+[package]
+name = "grpcx-rt"
+# L2 closed at v1.0 on 2026-06-07 (v0.7 close-out, see
+# ../../REFACTOR-v2-v0.7-close-out.md). Still a literal, NOT
+# `version.workspace = true`: grpcx-io and grpcx-rt share semver
+# stability at v1.x but their per-crate release cadences are
+# independent — each may ship a `1.x.y` independently of the other.
+# The workspace package version tracks the L1 surface only.
+version = "1.0.0"
+edition = "2024"
+description = "Zero-dep async runtime — task scheduler + reactor + timer wheel + channels on top of grpcx-io. A tokio replacement. No libc, no mio, no tokio."
+license = "Apache-2.0 OR MIT"
+repository = "https://github.com/goliajp/grpcx"
+homepage = "https://github.com/goliajp/grpcx"
+documentation = "https://docs.rs/grpcx-rt"
+authors = ["GOLIA K.K."]
+keywords = ["async", "runtime", "executor", "tokio-replacement", "io-uring"]
+categories = ["asynchronous", "no-std", "concurrency"]
+readme = "README.md"
+
+[lints]
+workspace = true
+
+[dependencies]
+# Lower-layer grpcx-* only (dep direction rule, ARCHITECTURE.md).
+# grpcx-io is L1; grpcx-rt is L2. The reactor driver (block_on,
+# Waker integration) is wired against grpcx-io::Poll starting v0.2.
+grpcx-io = { path = "../grpcx-io" }
+
+[dev-dependencies]
+# Bench-only. `compare_tokio.rs` runs `grpcx-rt` head-to-head against
+# `tokio` on identical workloads. `tokio` is dev-dep, never a runtime
+# dependency — the zero-external-dep promise for `src/` stands.
+criterion = { workspace = true }
+tokio = { workspace = true }
+
+[[bench]]
+name = "compare_tokio"
+harness = false

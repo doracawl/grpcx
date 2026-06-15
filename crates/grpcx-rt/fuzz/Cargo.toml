@@ -1,0 +1,49 @@
+[package]
+name = "grpcx-rt-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+# cargo-fuzz's standalone subcrate convention: declare an empty
+# [workspace] so this manifest opts out of the outer workspace
+# (which excludes us via `exclude = [...]` but cargo detects the
+# parent workspace first and refuses to build until we explicitly
+# opt out here).
+[workspace]
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.grpcx-rt]
+path = ".."
+
+[[bin]]
+name = "deque_ops"
+path = "fuzz_targets/deque_ops.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "timer_ops"
+path = "fuzz_targets/timer_ops.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "channel_ops"
+path = "fuzz_targets/channel_ops.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "runtime_spawn"
+path = "fuzz_targets/runtime_spawn.rs"
+test = false
+doc = false
+bench = false

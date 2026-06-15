@@ -1,0 +1,51 @@
+[package]
+name = "tonic-grpcx-comparator"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "v10.0 GATING e2e comparison harness: grpcx (gRPC over HTTP/3 over UDP loopback) vs tonic (gRPC over HTTP/2 over TCP loopback). Same echo workload, same timing methodology as stones/comparators. Bench-only: never a dependency of any grpcx-* crate."
+license = "Apache-2.0 OR MIT"
+
+# NOTE: edition 2021 (not 2024) — tonic-build 0.12's
+# generated code triggers edition-2024 lints we don't
+# control. The comparator is not shipped code.
+
+# No [lints] workspace inheritance: tonic codegen output
+# can't pass deny(missing_docs).
+
+[dependencies]
+grpcx = { path = "../../crates/grpcx" }
+grpcx-crypto = { path = "../../crates/grpcx-crypto" }
+grpcx-pb = { path = "../../crates/grpcx-pb" }
+grpcx-pb-derive = { path = "../../crates/grpcx-pb-derive" }
+rcgen = { workspace = true }
+tonic = { workspace = true }
+prost = { workspace = true }
+tokio = { workspace = true, features = ["net", "io-util", "signal"] }
+tokio-stream = { version = "0.1", default-features = false, features = ["net"] }
+
+[build-dependencies]
+tonic-build = { workspace = true }
+protox = { workspace = true }
+
+[[bin]]
+name = "bench"
+path = "src/main.rs"
+
+# The H2 interop bridge GATE (charter 2026-06-11): live
+# bidirectional grpcx<->tonic interop over h2c.
+[[bin]]
+name = "interop"
+path = "src/interop.rs"
+
+# Focused profiling harness for the pure-stack 64 KiB
+# unary path (feed to `samply record`).
+[[bin]]
+name = "profile64"
+path = "src/profile64.rs"
+
+# Same, over the real two-thread UDP loopback lane — the
+# shape the bench's grpcx-h3-udp rows measure.
+[[bin]]
+name = "profileudp"
+path = "src/profileudp.rs"

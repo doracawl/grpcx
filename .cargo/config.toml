@@ -1,0 +1,14 @@
+# Project-local cargo config.
+#
+# sccache was retired on 2026-06-09; the global dotfile that used
+# to `export RUSTC_WRAPPER=sccache` has been updated. No project-
+# local overrides are needed.
+#
+# We do NOT set `[build] rustc-wrapper = ""` here, and we do NOT
+# set `[env] RUSTC_WRAPPER = { value = "" }` here, because cargo
+# interprets an empty `RUSTC_WRAPPER` as "use the empty string as
+# the wrapper" — which then fails the build with `could not
+# execute process \` … \``. Both shapes were tried; both broke.
+#
+# If you reinstall sccache for another project, prefer scoping it
+# via that project's `[env]` instead of a global export.

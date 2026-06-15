@@ -1,0 +1,44 @@
+[package]
+name = "grpcx-idl-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[workspace]
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.grpcx-idl]
+path = ".."
+
+[[bin]]
+name = "primitive"
+path = "fuzz_targets/primitive.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "composite"
+path = "fuzz_targets/composite.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "varlen"
+path = "fuzz_targets/varlen.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tagged"
+path = "fuzz_targets/tagged.rs"
+test = false
+doc = false
+bench = false

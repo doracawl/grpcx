@@ -1,0 +1,58 @@
+[package]
+name = "grpcx-h3-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[workspace]
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.grpcx-h3]
+path = ".."
+
+[[bin]]
+name = "frame_ops"
+path = "fuzz_targets/frame_ops.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "field_section_static"
+path = "fuzz_targets/field_section_static.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "field_section_dynamic"
+path = "fuzz_targets/field_section_dynamic.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "encoder_instruction"
+path = "fuzz_targets/encoder_instruction.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "decoder_instruction"
+path = "fuzz_targets/decoder_instruction.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "stream_type"
+path = "fuzz_targets/stream_type.rs"
+test = false
+doc = false
+bench = false

@@ -1,0 +1,37 @@
+[package]
+name = "grpcx-quic-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[workspace]
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.grpcx-quic]
+path = ".."
+
+[[bin]]
+name = "varint_ops"
+path = "fuzz_targets/varint_ops.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "frame_ops"
+path = "fuzz_targets/frame_ops.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "header_parse"
+path = "fuzz_targets/header_parse.rs"
+test = false
+doc = false
+bench = false

@@ -1,0 +1,51 @@
+[package]
+name = "grpcx-wt-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[workspace]
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.grpcx-wt]
+path = ".."
+
+[[bin]]
+name = "wt_stream_prefix"
+path = "fuzz_targets/wt_stream_prefix.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "wt_datagram"
+path = "fuzz_targets/wt_datagram.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "capsule"
+path = "fuzz_targets/capsule.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "connect_request"
+path = "fuzz_targets/connect_request.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "response_status"
+path = "fuzz_targets/response_status.rs"
+test = false
+doc = false
+bench = false

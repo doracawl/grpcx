@@ -1,0 +1,145 @@
+[workspace.package]
+version = "1.4.0"
+
+[workspace]
+resolver = "2"
+members = [
+    "crates/grpcx-io",
+    "crates/grpcx-rt",
+    "crates/grpcx-crypto",
+    "crates/grpcx-quic",
+    "crates/grpcx-h3",
+    "crates/grpcx-h2",
+    "crates/grpcx-wt",
+    "crates/grpcx-idl",
+    "crates/grpcx-idl-derive",
+    "crates/grpcx-pb",
+    "crates/grpcx-pb-derive",
+    "crates/grpcx-ws",
+    "crates/grpcx",
+    "comparators/tonic-grpcx",
+]
+# cargo-fuzz's per-crate `fuzz/` subdir is a stand-alone package, not a
+# workspace member (it uses nightly + libfuzzer-sys + has its own lints).
+exclude = [
+    "crates/grpcx-io/fuzz",
+    "crates/grpcx-rt/fuzz",
+    "crates/grpcx-crypto/fuzz",
+    "crates/grpcx-quic/fuzz",
+    "crates/grpcx-h3/fuzz",
+    "crates/grpcx-wt/fuzz",
+    "crates/grpcx-idl/fuzz",
+]
+
+# Zero external dependencies for runtime code — by design.
+#
+# grpcx rewrites every infrastructure layer L1-L10 (OS IO abstraction,
+# async runtime, crypto, QUIC, HTTP/3, WebTransport, protobuf editions
+# compiler, IDL, HTTP/2, RPC core) in-house as a `grpcx-*` crate. See
+# ARCHITECTURE.md and DEPS_AUDIT.md.
+#
+# The only crate that may appear here is bench tooling reached from
+# `grpcx-*` crates' `benches/`. Any item touching `src/` or non-bench
+# `tests/` is forbidden.
+[workspace.dependencies]
+criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
+# Bench comparator only. Forbidden in `src/` and non-bench `tests/`.
+mio = { version = "1", default-features = false, features = ["os-poll", "os-ext"] }
+# Bench comparator only — `grpcx-rt`'s `compare_tokio` head-to-head.
+# Forbidden in `src/` and non-bench `tests/`. Same rule as `mio`.
+tokio = { version = "1", default-features = false, features = ["rt", "rt-multi-thread", "time", "sync", "macros"] }
+# Bench comparators only — the v10.0 GATING e2e harness lives in
+# comparators/tonic-grpcx (publish = false). Forbidden in `src/` of
+# any grpcx-* crate. Same exception class as criterion / mio / tokio.
+tonic = { version = "0.12", default-features = false, features = ["transport", "codegen", "prost", "tls"] }
+prost = { version = "0.13", default-features = false, features = ["std", "prost-derive"] }
+tonic-build = { version = "0.12", default-features = false, features = ["prost"] }
+protox = "0.7"
+# DOCUMENTED, TIME-BOUNDED 0-DEP EXCEPTION — the only non-grpcx-*
+# runtime dep allowed inside `src/`. Lives only in `grpcx-crypto`.
+# See DEPS_AUDIT.md § L3 crypto interim wrapper for the retire-when
+# condition (external cryptographer review window opens AND self-impl
+# passes BoGo + NIST CAVP). `ring` is the crypto provider; `std` is
+# required by rustls itself.
+rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }
+# Same exception as rustls — direct dep here because `grpcx-crypto`
+# names ring's AEAD / digest / HMAC / HKDF primitives at the wrapper
+# trait impl level (rustls's public surface is TLS-shaped, not a
+# generic primitive API). Already transit-pulled by rustls's
+# `["ring"]` feature; surfacing it here lets us depend on it
+# explicitly without doubling the dep graph.
+ring = { version = "0.17", default-features = false, features = ["alloc"] }
+# Bench / test only — used by `grpcx-crypto`'s `loopback_tls13` test
+# to mint a self-signed cert in-memory. Forbidden in `src/` and
+# non-bench / non-test `tests/`. Same rule as `criterion` / `mio` /
+# `tokio`.
+rcgen = { version = "0.13", default-features = false, features = ["ring", "pem"] }
+# Bench comparator only — `grpcx-quic`'s `compare_quinn` head-to-head.
+# Forbidden in `src/` and non-bench `tests/`. Same rule as `mio` /
+# `tokio` / `rcgen`. We pin `quinn-proto` (codec-only, no async
+# runtime) so the bench stays runtime-agnostic and apples-to-apples
+# with `grpcx-quic`'s wire-format layer.
+quinn-proto = { version = "0.11", default-features = false, features = ["ring"] }
+# Proc-macro tooling for `grpcx-idl-derive` (L7 v0.6). These are
+# compile-time-only — proc-macro crates never end up in the runtime
+# binary, so the "no external runtime deps" charter is preserved.
+# Same exception class as `criterion` / `rcgen` / `quinn-proto`.
+syn = { version = "2", features = ["full"] }
+quote = "1"
+proc-macro2 = "1"
+
+[workspace.lints.rust]
+warnings = "deny"
+
+[workspace.lints.clippy]
+all = { level = "deny" }
+
+# Performance-first release profile.
+#
+# grpcx is an infrastructure project where every µs in the hot path
+# matters more than build time. The three profiles mirror mailrs:
+#
+# - `release`: deploy profile, no compromise on runtime quality.
+# - `release-debug`: same opts as release, keeps line tables so
+#   flamegraph / perf record / Instruments / dtrace attribute samples.
+# - `release-vanilla`: cargo defaults restored, for honest baseline
+#   comparison against the perf-first profile (NOT for deploy).
+#
+# Knob rationale:
+# - lto = "fat": linker inlines + DCE's across crate boundaries,
+#   including across every grpcx-* layer. Non-negotiable for a stack
+#   where one hot op crosses 5-8 crates.
+# - codegen-units = 1: single CGU per crate, optimizer sees every
+#   callee. Trades build time for binary quality.
+# - panic = "abort": no unwinding tables. Infra crash → process exit;
+#   supervisor restarts. ~15-30% smaller binary, faster Result-heavy
+#   hot paths.
+# - strip = "symbols": lean deploy binary.
+# - overflow-checks = false: release default, made explicit to prevent
+#   accidental flip.
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+overflow-checks = false
+debug = false
+incremental = false
+
+[profile.release-debug]
+inherits = "release"
+debug = "line-tables-only"
+strip = "none"
+
+[profile.release-vanilla]
+inherits = "release"
+lto = false
+codegen-units = 16
+panic = "unwind"
+
+# Profiling: release codegen + symbols (samply / flamegraph).
+[profile.profiling]
+inherits = "release"
+debug = true
+strip = false

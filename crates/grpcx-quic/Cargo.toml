@@ -1,0 +1,45 @@
+[package]
+name = "grpcx-quic"
+# Literal, NOT `version.workspace = true`. L4 runs its own v0.x → v1.0
+# cadence; the workspace package version (1.0.0) tracks L1's released
+# surface. grpcx-quic joins the project-wide `v4.x` label only when
+# L4 closes. See ../../docs/v4-scope.md.
+version = "1.9.1"
+edition = "2024"
+description = "QUIC v1 transport (RFC 9000 + 9001 + 9002) on the grpcx stack. A quinn replacement. No libc, no mio, no tokio, no quinn."
+license = "Apache-2.0 OR MIT"
+repository = "https://github.com/goliajp/grpcx"
+homepage = "https://github.com/goliajp/grpcx"
+documentation = "https://docs.rs/grpcx-quic"
+authors = ["GOLIA K.K."]
+keywords = ["quic", "rfc9000", "rfc9001", "quinn-replacement", "transport"]
+categories = ["network-programming", "no-std", "asynchronous"]
+readme = "README.md"
+
+[lints]
+workspace = true
+
+[dependencies]
+# Lower-layer grpcx-* only (dep direction rule, ARCHITECTURE.md).
+# grpcx-io is L1; grpcx-rt is L2; grpcx-crypto is L3; grpcx-quic is L4.
+grpcx-io = { path = "../grpcx-io" }
+grpcx-rt = { path = "../grpcx-rt" }
+grpcx-crypto = { path = "../grpcx-crypto" }
+
+[dev-dependencies]
+# Test-only. `integ_initial.rs` (v0.5) mints a self-signed cert
+# so it can drive `grpcx-crypto`'s `ClientHandshake` /
+# `ServerHandshake` to produce real ClientHello / ServerHello
+# bytes. Same exception class as L3 v0.4's loopback test.
+rcgen = { workspace = true }
+# Head-to-head bench harness vs `quinn-proto`'s wire-format
+# primitives (`benches/compare_quinn.rs`). Codec-only — no async
+# runtime — so the bench stays apples-to-apples with L4's
+# `Frame` / `PacketHeader` / varint codecs. Numbers publish in
+# the v1.x perf pass; the harness compiles cleanly today.
+criterion = { workspace = true }
+quinn-proto = { workspace = true }
+
+[[bench]]
+name = "compare_quinn"
+harness = false

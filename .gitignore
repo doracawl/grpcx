@@ -1,0 +1,34 @@
+# Build artifacts (any depth)
+target/
+target-*/
+
+# Rust
+**/*.rs.bk
+**/Cargo.lock.bak
+/Cargo.lock
+
+# OS
+.DS_Store
+*.swp
+*.swo
+*~
+
+# IDE
+.idea/
+.vscode/
+
+# Logs / profiling
+*.log
+perf.data*
+perf.data.old
+flamegraph.svg
+samply-*.json
+
+# Fuzz state
+**/fuzz/corpus
+**/fuzz/artifacts
+
+# Internal — not for public eyes
+/.claude
+/_dev
+/MEMORY.md

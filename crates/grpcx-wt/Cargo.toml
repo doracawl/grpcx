@@ -1,0 +1,37 @@
+[package]
+name = "grpcx-wt"
+# Literal, NOT `version.workspace = true`. L6 runs its own v0.x → v1.0
+# cadence; the workspace package version (1.1.0) tracks L1's released
+# surface. grpcx-wt joins the project-wide `v6.x` label only when
+# L6 closes. See ../../docs/v6-scope.md.
+version = "1.0.0"
+edition = "2024"
+description = "WebTransport over HTTP/3 (RFC 9220 + draft-ietf-webtrans-http3) on the grpcx stack. A wtransport replacement. No libc, no mio, no tokio, no quinn, no h3, no wtransport."
+license = "Apache-2.0 OR MIT"
+repository = "https://github.com/goliajp/grpcx"
+homepage = "https://github.com/goliajp/grpcx"
+documentation = "https://docs.rs/grpcx-wt"
+authors = ["GOLIA K.K."]
+keywords = ["webtransport", "rfc9220", "http3", "datagram", "wtransport-replacement"]
+categories = ["network-programming", "web-programming"]
+readme = "README.md"
+
+[lints]
+workspace = true
+
+[dependencies]
+# Lower-layer grpcx-* only (dep direction rule, ARCHITECTURE.md).
+# grpcx-io L1; grpcx-rt L2; grpcx-crypto L3; grpcx-quic L4;
+# grpcx-h3 L5; grpcx-wt L6.
+grpcx-io = { path = "../grpcx-io" }
+grpcx-rt = { path = "../grpcx-rt" }
+grpcx-crypto = { path = "../grpcx-crypto" }
+grpcx-quic = { path = "../grpcx-quic" }
+grpcx-h3 = { path = "../grpcx-h3" }
+
+[dev-dependencies]
+# v0.3 CONNECT-bootstrap integ test (`tests/integ_connect.rs`)
+# mints a self-signed Ed25519 cert so it can drive the QUIC
+# handshake end-to-end. Same exception class as L3 v0.4 /
+# L4 v0.6 / L5 v0.5 loopback tests.
+rcgen = { workspace = true }

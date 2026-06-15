@@ -1,0 +1,14 @@
+// Stage C proto2 frontend wire-compat probe (charter
+// 2026-06-12): encoded by BOTH prost (tonic-build) and
+// grpcx-pb (proto_inline!) and cross-decoded in interop.
+syntax = "proto2";
+
+package probe2.v1;
+
+message LegacyProbe {
+  optional int32 oi = 1;
+  optional string os = 2;
+  optional bool ob = 3;
+  required int32 must = 4;
+  repeated int32 tags = 5;
+}

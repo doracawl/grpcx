@@ -1,0 +1,121 @@
+name: test
+
+on:
+  push:
+    branches: [master, develop]
+  pull_request:
+    branches: [master, develop]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Native gating job — fmt + clippy + doc + test on the host runner.
+  # ubuntu-latest covers x86_64-linux; macos-latest covers Darwin.
+  gate-native:
+    name: gate (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        run: |
+          rustup toolchain install stable --component rustfmt --component clippy --component rust-src
+          rustup default stable
+
+      - name: Cache cargo + target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ matrix.os }}-cargo-${{ hashFiles('**/Cargo.toml', '**/Cargo.lock') }}
+          restore-keys: |
+            ${{ matrix.os }}-cargo-
+
+      - name: fmt --check
+        run: cargo fmt --all --check
+
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: check
+        run: cargo check --workspace --all-targets
+
+      - name: doc
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --workspace --no-deps
+
+      - name: test (conformance only; perf gate locally on a quiet box)
+        run: cargo test --workspace --no-fail-fast -- --skip _under_budget
+
+  # Cross-compile gating — verify every cfg-gated backend builds.
+  # Doesn't run tests (no foreign-OS execution); just clippy + check.
+  cross-compile:
+    name: cross-compile (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - aarch64-unknown-linux-gnu
+          - x86_64-unknown-freebsd
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install stable toolchain + target
+        run: |
+          rustup toolchain install stable --component rustfmt --component clippy --component rust-src
+          rustup default stable
+          rustup target add ${{ matrix.target }}
+
+      - name: Cache cargo + target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cross-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.toml', '**/Cargo.lock') }}
+          restore-keys: |
+            cross-${{ matrix.target }}-cargo-
+
+      - name: clippy (cross)
+        run: cargo clippy --target ${{ matrix.target }} --workspace --all-targets -- -D warnings
+
+      - name: check (cross)
+        run: cargo check --target ${{ matrix.target }} --workspace --all-targets
+
+      - name: doc (cross)
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --target ${{ matrix.target }} --workspace --no-deps
+
+  # Optional iOS cross-compile — verifies Darwin family doesn't regress.
+  # Runs on macOS so the iOS targets are installable.
+  cross-compile-ios:
+    name: cross-compile (${{ matrix.target }})
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - aarch64-apple-ios
+          - aarch64-apple-ios-sim
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install stable toolchain + target
+        run: |
+          rustup toolchain install stable
+          rustup default stable
+          rustup target add ${{ matrix.target }}
+
+      - name: check (cross)
+        run: cargo check --target ${{ matrix.target }} --workspace --all-targets

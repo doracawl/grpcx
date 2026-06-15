@@ -1,0 +1,46 @@
+[package]
+name = "grpcx-io"
+version.workspace = true
+edition = "2024"
+description = "Zero-dep cross-platform async-ready OS IO abstraction — epoll / io_uring / kqueue / IOCP under one unified Reactor. No libc, no mio."
+license = "Apache-2.0 OR MIT"
+repository = "https://github.com/goliajp/grpcx"
+homepage = "https://github.com/goliajp/grpcx"
+documentation = "https://docs.rs/grpcx-io"
+authors = ["GOLIA K.K."]
+keywords = ["io", "epoll", "io-uring", "kqueue", "iocp"]
+categories = ["asynchronous", "no-std", "os"]
+readme = "README.md"
+
+[lints]
+workspace = true
+
+[dependencies]
+# No deps. Zero-dep by founding rule. See ../../DEPS_AUDIT.md.
+
+[dev-dependencies]
+# bench harness; runtime code does not depend on this. See
+# ../../DEPS_AUDIT.md.
+criterion = { workspace = true }
+# bench comparator; only used in `benches/compare_*.rs`.
+mio = { workspace = true }
+
+[[bench]]
+name = "poll_idle"
+harness = false
+
+[[bench]]
+name = "poll_drain"
+harness = false
+
+[[bench]]
+name = "register_fastpath"
+harness = false
+
+[[bench]]
+name = "compare_mio"
+harness = false
+
+[[bench]]
+name = "compare_uring"
+harness = false

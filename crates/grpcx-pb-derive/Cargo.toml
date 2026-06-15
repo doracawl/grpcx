@@ -1,0 +1,25 @@
+[package]
+name = "grpcx-pb-derive"
+version = "0.1.0"
+edition = "2024"
+description = "proto! proc-macro for the grpcx stack — compiles .proto (editions 2023 / proto3) to typed Rust at compile time via grpcx-pb. No protoc, no build.rs, no OUT_DIR; errors carry proto-file line/col."
+license = "Apache-2.0 OR MIT"
+repository = "https://github.com/goliajp/grpcx"
+homepage = "https://github.com/goliajp/grpcx"
+documentation = "https://docs.rs/grpcx-pb-derive"
+authors = ["GOLIA K.K."]
+keywords = ["protobuf", "grpc", "proc-macro", "codegen", "tonic-build-replacement"]
+categories = ["development-tools::procedural-macro-helpers", "encoding"]
+readme = "README.md"
+
+[lib]
+proc-macro = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# L8 is the whole compiler — and proc_macro's own
+# TokenStream FromStr does the parsing, so this macro
+# needs NEITHER syn NOR quote. Zero external deps.
+grpcx-pb = { path = "../grpcx-pb", version = "1.3.0" }
