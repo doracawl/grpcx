@@ -8,12 +8,12 @@
 
 use alloc::string::String;
 use alloc::vec::Vec;
-use std::io::{Read, Write};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
 use super::rendezvous::{RegionDescriptor, connect_rendezvous};
 use super::ring::{self, Ring, RingError, SLOT_STRIDE};
+use super::wake::{wake_signal, wake_wait};
 use crate::wire_v2::{
     Flags, FrameType, Header, MetadataEntry, block_wire_len, decode_metadata_block,
     encode_metadata_block,
@@ -289,11 +289,9 @@ impl ShmemConnection {
                     } else if self.busy_poll_us > 0 {
                         // Bounded busy-poll: fall back to
                         // wait_file if window expired.
-                        let mut byte = [0u8; 1];
-                        let _ = self.wait_file.read(&mut byte);
+                        let _ = wake_wait(&mut self.wait_file);
                     } else {
-                        let mut byte = [0u8; 1];
-                        let _ = self.wait_file.read(&mut byte);
+                        let _ = wake_wait(&mut self.wait_file);
                     }
                 }
                 Err(_) => return Err(RpcError::Transport("shmem: ring pop error")),
@@ -478,11 +476,11 @@ impl ShmemConnection {
                 .push_cached(header, payload, &mut self.send_cached_rpos)
             {
                 Ok(()) => {
-                    let _ = self.signal_file.write_all(&[1u8]);
+                    let _ = wake_signal(&mut self.signal_file);
                     return Ok(());
                 }
                 Err(RingError::Full) => {
-                    let _ = self.signal_file.write_all(&[1u8]);
+                    let _ = wake_signal(&mut self.signal_file);
                     std::thread::sleep(Duration::from_micros(10));
                 }
                 Err(RingError::FrameTooLarge) => {
@@ -531,8 +529,7 @@ impl ShmemConnection {
             {
                 Ok(h) => return Ok(h),
                 Err(RingError::Empty) => {
-                    let mut byte = [0u8; 1];
-                    let _ = self.wait_file.read(&mut byte);
+                    let _ = wake_wait(&mut self.wait_file);
                 }
                 Err(_) => return Err(RpcError::Transport("shmem: ring pop error")),
             }

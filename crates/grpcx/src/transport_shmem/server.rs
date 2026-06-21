@@ -10,7 +10,6 @@
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
-use std::io::{Read, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -18,6 +17,7 @@ use std::time::Duration;
 
 use super::rendezvous::{ServerSideRegion, accept_rendezvous};
 use super::ring::{self, Ring, RingError};
+use super::wake::{wake_signal, wake_wait};
 use crate::wire_v2::{
     Flags, FrameType, Header, MetadataEntry, block_wire_len, decode_metadata_block,
     encode_metadata_block,
@@ -116,8 +116,7 @@ impl ShmemConnWorker {
             {
                 Ok(h) => return Ok(h),
                 Err(RingError::Empty) => {
-                    let mut byte = [0u8; 1];
-                    if self.wait_file.read(&mut byte).is_err() {
+                    if wake_wait(&mut self.wait_file).is_err() {
                         return Err(RpcError::Transport("shmem: wait fd closed"));
                     }
                 }
@@ -394,11 +393,11 @@ impl ShmemConnWorker {
                 .push_cached(header, payload, &mut self.send_cached_rpos)
             {
                 Ok(()) => {
-                    let _ = self.signal_file.write_all(&[1u8]);
+                    let _ = wake_signal(&mut self.signal_file);
                     return Ok(());
                 }
                 Err(RingError::Full) => {
-                    let _ = self.signal_file.write_all(&[1u8]);
+                    let _ = wake_signal(&mut self.signal_file);
                     std::thread::sleep(Duration::from_micros(10));
                 }
                 Err(RingError::FrameTooLarge) => {

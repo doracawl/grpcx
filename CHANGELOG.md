@@ -124,6 +124,20 @@ wire normative: `_dev/SPEC-wire-v2.md`.
     stacked); v1.8 lands A1+A2 (~2 µs saving as predicted, no翻盘).
     A4 (`net.Socket._handle` bypass, 1.5-2 µs further) is deferred
     as risk-controlled v1.9 prepared work.
+  - **v1.9 — Linux `eventfd(2)` wake-fd migration** in
+    `transport_shmem::wake`. On Linux uses one `eventfd(2)` per
+    direction (single fd, 8-byte counter, lighter kernel path); on
+    Darwin / FreeBSD / NetBSD keeps `pipe(2)`. New `wake_signal` /
+    `wake_wait` helpers hide the per-platform byte width (8 B on
+    Linux, 1 B on others). Saves ~10 % of `shmem-rtt-park` median
+    on lx64 (Intel i7-10700K, kernel 6.12): 3.97 → **3.54 µs (-11 %)**.
+    Smaller than the ~30-40 % naive estimate because Linux 6.12
+    `pipe(2)` is already well-optimized. The RFC § 8 < 3 µs gate
+    is now 1.18× over (was 1.32×); closing it fully would need
+    "consumer-blocked" flag in shmem to enable conditional
+    `wake_signal` — deferred (the implementation would need an
+    additional atomic field in the rendezvous'd region plus
+    Acquire/Release coordination around `wake_wait`).
 - **`transport-tcp-mux` v2** (raw-TCP wire-v2 mode, parallel to
   the existing v1 mux-frame `transport-tcp-mux`).
   - `TcpMuxV2Connection::connect(addr, authority)` + the four
