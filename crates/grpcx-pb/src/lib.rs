@@ -46,6 +46,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 mod codegen;
+mod codegen_ts;
 mod lexer;
 mod parser;
 mod semantic;
@@ -53,6 +54,7 @@ mod sizes;
 mod wire;
 
 pub use codegen::codegen;
+pub use codegen_ts::codegen_ts;
 pub use wire::{
     ProtoCodec, WireError, WireType, decode_fixed32, decode_fixed64, decode_length_delimited,
     decode_string, decode_tag, decode_varint, encode_fixed32, encode_fixed64,

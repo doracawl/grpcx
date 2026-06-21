@@ -21,6 +21,17 @@ readme = "README.md"
 [lints]
 workspace = true
 
+[features]
+# io_uring completion-based path for transport-tcp-mux v2 (T4.2 of
+# the internal-RPC v1 plan, `_dev/IMPLEMENTATION-PLAN.md`). The
+# module compiles only on `cfg(target_os = "linux")` — enabling
+# this feature on a non-Linux target is a no-op so downstream
+# crates can keep their feature lists portable. macOS / FreeBSD
+# callers stay on the T4.1 blocking path automatically. Off by
+# default so the v1.0 surface (`Runtime` + `block_on`) keeps its
+# current cost profile; opt in with `--features iouring`.
+iouring = []
+
 [dependencies]
 # Lower-layer grpcx-* only (dep direction rule, ARCHITECTURE.md).
 # grpcx-io is L1; grpcx-rt is L2. The reactor driver (block_on,

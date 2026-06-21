@@ -368,7 +368,7 @@ service Greeter {
 
     // Client: tonic naming habit, snake_case fns, typed IO.
     assert!(out.contains("pub struct GreeterClient;"));
-    assert!(out.contains("pub fn say_hello(conn: &mut ::grpcx::ConnectedChannel"));
+    assert!(out.contains("pub fn say_hello<C: ::grpcx::RpcChannel>(conn: &mut C"));
     assert!(out.contains("ctx: &mut ::grpcx::CallContext, request: &Req)"));
     assert!(out.contains("ctx.set_trailing(__trailing);"));
     assert!(out.contains("request: &Req) -> Result<Resp, ::grpcx::RpcError>"));

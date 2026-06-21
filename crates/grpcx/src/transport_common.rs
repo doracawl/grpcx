@@ -609,6 +609,44 @@ impl ConnectedChannel {
     }
 }
 
+impl crate::RpcChannel for ConnectedChannel {
+    fn call_unary(
+        &mut self,
+        method: &Method,
+        metadata: &Metadata,
+        request: &[u8],
+    ) -> Result<(Vec<u8>, Metadata), RpcError> {
+        ConnectedChannel::call_unary(self, method, metadata, request)
+    }
+
+    fn call_server_streaming(
+        &mut self,
+        method: &Method,
+        metadata: &Metadata,
+        request: &[u8],
+    ) -> Result<(Vec<Vec<u8>>, Metadata), RpcError> {
+        ConnectedChannel::call_server_streaming(self, method, metadata, request)
+    }
+
+    fn call_client_streaming(
+        &mut self,
+        method: &Method,
+        metadata: &Metadata,
+        requests: &[&[u8]],
+    ) -> Result<(Vec<u8>, Metadata), RpcError> {
+        ConnectedChannel::call_client_streaming(self, method, metadata, requests)
+    }
+
+    fn call_bidi(
+        &mut self,
+        method: &Method,
+        metadata: &Metadata,
+        requests: &[&[u8]],
+    ) -> Result<(Vec<Vec<u8>>, Metadata), RpcError> {
+        ConnectedChannel::call_bidi(self, method, metadata, requests)
+    }
+}
+
 // ============================================================
 // TCP transport (byte-stream chunks through the same
 // DatagramTransport seam — the pumps are chunk-oriented,

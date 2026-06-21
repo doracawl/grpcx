@@ -50,6 +50,28 @@ transport-h2-tls = ["transport-h2", "dep:grpcx-crypto"]
 # handshake. The mux codec is pure alloc; L1 rides along
 # for the reactor idle park on `TcpTransport`.
 transport-tcp-mux = ["dep:grpcx-io", "dep:grpcx-rt"]
+# T4.2 of the internal-RPC v1 plan: opt-in io_uring fast
+# path for the wire-v2 server side of `transport-tcp-mux`.
+# Linux-only at the cfg(target_os) level — enabling on
+# macOS / FreeBSD pulls the `grpcx-rt` iouring feature
+# (a no-op surface there) and the server falls through
+# to the T4.1 blocking accept-thread path automatically.
+# Off by default because real-world validation requires a
+# Linux runner; turn on with `--features transport-tcp-mux-iouring`.
+transport-tcp-mux-iouring = ["transport-tcp-mux", "grpcx-rt/iouring"]
+# Internal-RPC same-host transport over AF_UNIX
+# (`_dev/RFC-internal-rpc-arch.md` § 4 / wire v2 per
+# `_dev/SPEC-wire-v2.md`). Carries `wire_v2` frames over
+# `std::os::unix::net::UnixStream`. Weak-security path —
+# trust comes from POSIX uid via `SO_PEERCRED`.
+transport-uds = ["dep:grpcx-io", "dep:grpcx-rt"]
+# Internal-RPC same-host transport over POSIX
+# shared memory + UDS rendezvous control plane
+# (`_dev/RFC-internal-rpc-arch.md` § 3). T3.1 lands
+# the rendezvous + region attach; the SPSC ringbuf data
+# plane (T3.2) layers on top. Depends on transport-uds
+# for the control-channel byte path.
+transport-shmem = ["transport-uds"]
 
 [dependencies]
 # Transport edges — optional, see [features]. The dep

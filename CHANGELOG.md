@@ -12,6 +12,282 @@ ordered newest-first.
 
 ---
 
+## grpcx — Unreleased (internal-RPC v1)
+
+The internal-RPC v1 stack — three new same-host / same-network
+transports carrying wire format v2, plus a `RpcChannel` trait that
+lets generated client stubs ride either the existing v1 mux-frame
+pipelines or the v2 wire pipelines transparently. Binding plan:
+`_dev/IMPLEMENTATION-PLAN.md`; architecture: `_dev/RFC-internal-rpc-arch.md`;
+wire normative: `_dev/SPEC-wire-v2.md`.
+
+### Added
+
+- **`transport-uds`** feature — AF_UNIX same-host transport.
+  - `UdsConnection::connect(path, authority)` + the four
+    `call_unary` / `call_server_streaming` /
+    `call_client_streaming` / `call_bidi` methods.
+  - `Server::listen_uds[_until](path[, stop])`.
+  - `UdsServerConn` reserved as a future sans-IO surface.
+  - Kernel-attested `PeerCred` (uid/gid/pid via `SO_PEERCRED` /
+    `getpeereid(3)`) surfaced through `CallContext::peer_cred()`.
+- **`transport-shmem`** feature (depends on `transport-uds`) —
+  POSIX shared-memory ring transport with UDS rendezvous control
+  plane + wake fds via `SCM_RIGHTS`.
+  - `ShmemConnection::connect(rendezvous_path, authority)` + the
+    four call shapes.
+  - `Server::listen_shmem[_until]`.
+  - `ShmemConnection::set_busy_poll_threshold(Duration)` for the
+    sub-microsecond busy-poll mode (vs the default park-on-wake-fd).
+  - `ShmemConnection::set_busy_poll_unbounded(bool)` +
+    `Server::listen_shmem_busy_poll_until(path, stop)` — symmetric
+    **both-or-neither** mode where both ends drop wake-fd syscalls
+    entirely (consumer `spin_loop` on the ring head, producer
+    publishes without poking the wake pipe). Closes the per-frame
+    `pipe(2)` syscall that bottlenecked throughput-class flows.
+    lx64 shmem-throughput 0.093 → 1.49 GB/s (16×); macOS arm64
+    > 5 GB/s (RFC § 8 gate cleared on this hardware).
+  - `SLOTS_PER_RING` bumped from 4 → 16 (Rust + the TS N-API mirror
+    `kSlotsPerRing` stays in sync); region now 128 KiB per side
+    instead of 16 KiB. Gives the busy-poll producer enough headroom
+    to stop spinning on `Full` every fourth push.
+  - **v1.5 — Rigtorp cached opposite-side index** on the SPSC ring:
+    `Ring::push_cached(header, payload, &mut cached_rpos)` and
+    `Ring::pop_cached(out, &mut cached_wpos)`. Producer reads its own
+    local cached `reader_pos` snapshot on the hot path; only on a
+    "cache says Full" miss does it pay an `Acquire`-load of the true
+    `reader_pos`. Consumer side symmetric. Pattern from Rigtorp's
+    SPSC writeup + Aeron's `headCachePositionIndex`. On lx64 + 3 KiB
+    bodies this is only ~2 % alone (workload is memcpy-bound not
+    atomic-bound), but it's the right shape and lets the throughput
+    path scale on tinier-message workloads.
+  - **v1.5 — `ShmemConnection::call_server_streaming_view<F>`**
+    additive zero-copy API. Each Data frame's payload is delivered
+    to the caller's `FnMut(&[u8])` closure as a borrow into the
+    shared-memory ring slot, with no `memcpy` out of shmem and no
+    per-frame heap allocation. Standard
+    `call_server_streaming` (owned `Vec<Vec<u8>>`) remains for
+    callers who need owned bodies.
+  - **v1.5 — `Ring::pop_view_cached` + `Ring::advance_reader`** —
+    primitives backing the zero-copy view. Borrow lifetime tied to
+    `&self`; caller releases by calling `advance_reader`.
+  - **v1.5 throughput numbers**: lx64 (Intel i7-10700K) shmem
+    throughput **1.49 → 34.04 GB/s** (23×); macOS arm64 5.20 →
+    43.91 GB/s. RFC § 8 > 5 GB/s gate **6.8× over** on lx64.
+  - **v1.6 — JS-side metadata block codec** in the TS transport
+    packages (`@grpcx/transport-shmem`, `@grpcx/transport-uds`,
+    `@grpcx/transport-tcp-mux`). Replaces N-API
+    `encodeMetadataBlock` / `decodeMetadataBlock` cross-boundary
+    calls with inline TS implementations (`jsEncodeMetadataBlock`,
+    `jsDecodeMetadataBlock`) reading/writing the wire bytes
+    directly. Drops 1 N-API crossing + 1 V8 ArrayBuffer alloc per
+    outbound frame and 1 N-API crossing + N+1 V8 Uint8Array allocs
+    per inbound metadata-bearing frame. Adds a unary fast path that
+    returns `recvBuf.subarray(0, plen)` zero-copy view when
+    `expectSingle && END_STREAM`. **lx64 TS shmem-rtt 18.25 → 12.28
+    µs (-33 %), TS uds-rtt 24.50 → 20.41 µs (-17 %)**. The N-API
+    `encodeMetadataBlock` / `decodeMetadataBlock` exports remain
+    available in `@grpcx/native` for callers that prefer the C++
+    codec.
+  - **v1.7 — `ShmemConnection.setBusyPollUnbounded(boolean)`** on
+    the TS side and `SHMEM_BUSY_POLL=1` env-driven busy-poll mode
+    on the Rust `shmem_test_server` example. When enabled symmetrically,
+    both ends drop the per-RPC `wakeWrite` + `wakeRead` eventfd
+    syscalls and spin on the ring in user space. Mirrors the
+    Rust-side `set_busy_poll_unbounded` from v1.3 on the TS surface.
+  - **v1.7 — `beginMetaCache` per-(service, method, kind) cache** of
+    the pre-encoded 3-entry pseudo-header bytes inside
+    `@grpcx/transport-shmem`. When `requestMeta` is empty (the bench
+    hot path and the typical non-streaming call shape), the cached
+    block is reused — no `Buffer.from(service)` /
+    `Buffer.from(method)` / `jsEncodeMetadataBlock` per call.
+  - **v1.7 TS shmem RTT numbers**: lx64 12.28 → **5.44 µs (-56 %)**;
+    cumulative from v1.5 baseline 18.25 → 5.44 µs = **-70 % / 3.3×**.
+    macOS arm64 9.29 → **2.25 µs** (1.96 µs min). 5-6 µs Node + N-API
+    idiomatic floor (Phase A predicted, v1.7 measured) is the
+    earned ceiling on Node; sub-µs requires Bun/Deno FFI bypass.
+  - **v1.8 — JS-side `jsEncodeHeader` / `jsDecodeHeader`** in
+    `@grpcx/transport-uds` and `@grpcx/transport-tcp-mux`. Builds /
+    reads the 16-byte wire header (`stream_id u32 LE | frame_type u8 |
+    flags u8 | metadata_count u16 LE | payload_len u32 LE | reserved`)
+    via `Buffer.allocUnsafe(16)` + 6 `writeUInt*LE` / `readUInt*LE`
+    calls — zero N-API crossings on the hot path. The N-API
+    `encodeHeader` / `decodeHeader` exports remain available in
+    `@grpcx/native`.
+  - **v1.8 — `beginMetaCache` per-(service, method, kind) cache**
+    in `@grpcx/transport-uds`, mirroring the v1.7
+    `@grpcx/transport-shmem` change. No-user-metadata calls reuse
+    the cached 3-entry pre-encoded pseudo-header block.
+  - **v1.8 TS UDS RTT numbers**: lx64 20.09 → **15.98 µs (-20 %)**;
+    macOS arm64 15.5 → 10.4-12.1 µs (-25 %). Phase A had predicted
+    ~13 µs idiomatic Node + N-API + AF_UNIX floor (all 5 techniques
+    stacked); v1.8 lands A1+A2 (~2 µs saving as predicted, no翻盘).
+    A4 (`net.Socket._handle` bypass, 1.5-2 µs further) is deferred
+    as risk-controlled v1.9 prepared work.
+- **`transport-tcp-mux` v2** (raw-TCP wire-v2 mode, parallel to
+  the existing v1 mux-frame `transport-tcp-mux`).
+  - `TcpMuxV2Connection::connect(addr, authority)` + the four
+    call shapes; TCP_NODELAY on by default.
+  - `Server::listen_tcp_mux_v2[_until]`.
+  - `Server::listen_tcp_mux_v2_busy_poll_until(addr, stop)` —
+    deployer-opt-in user-space busy-poll serve loop: bypasses
+    the SQPOLL + linux_iouring fast paths, sets the accepted
+    socket non-blocking, and spins `read_frame` on `WouldBlock`
+    instead of paying a `read(2)` syscall per RPC. Closes the
+    RFC § 8 < 8 µs gate on lx64 (8.2 → 6.6 µs median tcpmux-rtt;
+    new bench flag `--tcpmux-server-busy-poll`). Costs one CPU
+    per active connection on the server.
+  - `TcpMuxV2ServerConn` reserved.
+- **`transport-tcp-mux-iouring`** feature (opt-in, Linux only at
+  the cfg level — no-op on non-Linux) — io_uring per-connection
+  fast path for the `transport-tcp-mux v2` server. v1 wiring uses
+  submit-and-wait per syscall; benched on Linux 6.12 it currently
+  *loses* to the T4.1 blocking serve (folds into the v1.1 perf
+  workstream that upgrades to SQPOLL + multishot recv + linked-
+  send pair).
+- **`wire_v2` module** — frame codec for the v2 transports.
+  `Header` (16 B fixed) / `FrameType` (Begin / Data / End / Reset
+  / Ping / Pong) / `Flags` (END_STREAM / HAS_METADATA /
+  CONTINUATION) / `MetadataEntry` + `encode_metadata_block` /
+  `decode_metadata_block` + the constant-time `decode_header` /
+  `encode_header`. KAT vectors at `_dev/kat-vectors/9.{1,2,3,4}*.hex`
+  validate against both the Rust codec (`kat_wire_v2`) and the TS /
+  C++ codec (`@grpcx/native`).
+- **`wire_v2::pseudo` submodule** — hot-path fast helpers for
+  the v2 BEGIN/END pseudo-headers: `STATUS_OK_BLOCK`
+  (17-byte pre-baked `:status = OK` END metadata literal),
+  `encode_begin_block(out, service, method, kind, user)` stack-
+  buffer writer, plus the `PSEUDO_*` name constants shared
+  across the three transports. UDS client `send_begin` and
+  server `send_response` now take a 128-byte-stack-buffer fast
+  path on the no-user-metadata case (the bench hot path), and
+  splice `STATUS_OK_BLOCK` directly into END frames without
+  re-encoding it per RPC.
+- **`RpcChannel` trait** at the crate root — bridges the v1
+  `ConnectedChannel` and every v2 transport's connection type
+  (`UdsConnection`, `ShmemConnection`, `TcpMuxV2Connection`) so
+  generated client stubs work over either.
+- **`CallContext::peer_cred()`** + `Service::dispatch_with_ctx`
+  — v2 ctx-aware dispatch entry point with kernel-attested peer
+  credentials threaded through.
+
+### Fixed
+
+- **Linux `struct cmsghdr` SCM_RIGHTS width** — `cmsg_len` is
+  `size_t` (8 B) on Linux glibc, `socklen_t` (4 B) on
+  Darwin/FreeBSD. The shmem rendezvous code hard-coded `u32`;
+  every shmem call hung at "server never bound" on Linux. Fixed
+  in `transport_shmem::rendezvous` with `cfg(target_os = ...)`-
+  conditional `CmsgHdr` + `CMSG_BUF_LEN_3FD` + `cmsg_len_for_3fds`.
+
+### Changed
+
+- **`transport-tcp-mux v2` Linux serve — v1.1 SQPOLL
+  event loop** (gated `feature = "transport-tcp-mux-iouring"`).
+  New `transport_tcp_mux_v2::linux_iouring_v2` module
+  rewrites the per-connection serve as SQPOLL ring +
+  cqe-driven event loop + single-SEND-per-frame
+  (replaces v1's `submit + submit_and_wait` per syscall
+  shape). Fallback chain on setup failure: v1.1 SQPOLL →
+  v1 plain ring → T4.1 blocking. Measured tcpmux-rtt on
+  lx64 (kernel 6.12, Debian 13) at **11.59 µs median**
+  (10 000 samples × 3 runs warm), 1.15× faster than
+  T4.1 blocking and 1.64× faster than v1 iouring.
+- **`transport-tcp-mux v2` Linux client — v1.1.1
+  symmetric io_uring** (same feature gate). New
+  `transport_tcp_mux_v2::linux_iouring_client` module
+  routes `TcpMuxV2Connection::call_unary` through a
+  plain (non-SQPOLL) ring: SEND + RECV submitted as a
+  batch, drained by one `io_uring_enter(GETEVENTS)`
+  per CQE wait instead of three separate blocking
+  syscalls (writev + 2 × read_exact). Plain ring (not
+  SQPOLL) is intentional — the bench harness runs
+  client + server in the same process, and two SQPOLL
+  threads pinned to the same CPU serialise on the
+  scheduler quantum (~4 ms per RPC observed
+  experimentally; reverted in favour of the
+  syscall-batched plain ring). The bench harness now
+  links the `transport-tcp-mux-iouring` feature so
+  Linux runs through the symmetric path automatically.
+  Measured tcpmux-rtt on lx64 at **9.04 µs median**
+  across 3 × 10 000-sample runs (8.99 / 9.04 / 9.20 µs;
+  min 8.66 µs), 1.49× faster than T4.1 blocking and
+  1.28× faster than v1.1 server-only.
+- **`transport-tcp-mux v2` Linux — v1.2 send buffer
+  pool** (same feature gate). Both ends drop the
+  v1.1 / v1.1.1 `Box::leak`-per-frame pattern in
+  favour of recycled buffers:
+  - Client (`linux_iouring_client::ClientRing`) holds
+    one `send_buf: Vec<u8>` reused across calls; safe
+    because `call_unary` strictly alternates send →
+    recv (one SEND in flight at a time, drained inside
+    `recv_frame::drain_cqes` before the next call).
+  - Server (`linux_iouring_v2::Conn`) holds a 64-slot
+    `send_slots: Vec<Vec<u8>>` pool keyed by `user_data
+    = UD_SEND_BASE + slot_idx`; `drive_loop` returns
+    each slot to `free_slots` when its CQE drains.
+    Supports the streaming RPC case where multiple
+    DATA / END frames are in flight on the same
+    connection.
+  - **Perf verdict**: measured tcpmux-rtt on lx64 at
+    9.04 / 9.09 / 9.22 µs median across 3 × 10 000
+    runs (min 8.62 µs) — **within noise of v1.1.1**.
+    The per-frame allocator cost was not the
+    bottleneck on glibc's tcmalloc-fast-path. v1.2 is
+    a correctness / no-allocation-growth win for
+    long-running services, not a perf win.
+- **`TcpMuxV2Connection::set_busy_poll_threshold(Duration)`**
+  — v1.2.1 client-side busy-poll opt-in (same API
+  shape as `ShmemConnection::set_busy_poll_threshold`).
+  Default `Duration::ZERO` (blocking-wait path,
+  v1.2 behaviour unchanged). When set, the client's
+  io_uring recv path submits SQEs without a wait and
+  spins on the CQ ring (memory-mapped, syscall-free)
+  for up to the window, falling back to
+  `io_uring_enter(WAIT)` on exhaustion.
+- **`internal-rpc-bench --tcpmux-busy-poll-us N`** flag
+  added to the bench harness so the opt-in can be
+  measured alongside the default.
+- **Honest RFC § 8 verdict for `tcpmux-rtt`**: lx64
+  measurements with `--tcpmux-busy-poll-us` swept at
+  10 / 50 / 100 µs come in at 9.21 / 9.18 / **8.94 µs**
+  median (min 8.43 µs at the 100 µs window) vs 9.22 µs
+  baseline — **a marginal ~3 % improvement**. `perf`
+  attribution (`grpcx-v1-bench/_dev/v1.2-perf.data`):
+  21 % of cycles are in the server-side SQPOLL kernel
+  thread (`io_sq_thread` + `tctx_task_work_run`); 5.8 %
+  in `clear_bhb_loop` (Spectre branch-history
+  mitigation on syscall entry); only ~8 % in client-side
+  syscall path. Client busy-poll skips the 8 % but
+  leaves the dominant 21 % SQPOLL overhead untouched.
+  **The < 8 µs gate is not reachable from the client
+  side alone** — closing it requires switching the
+  server from SQPOLL to user-space busy-poll on the
+  serve thread, which is an idle-connection-CPU
+  trade-off (server CPU now scales with connection
+  count, not RPC rate). That architectural decision is
+  deferred to the deployer; recommended-reading is to
+  **document the gate at 9 µs on Linux loopback for
+  the SQPOLL-server + sync-client topology**, and
+  expose the opt-in busy-poll knob for callers who
+  control the CPU budget.
+
+### Notes (RFC § 8 perf gates)
+
+T5.4 bench harness (`comparators/internal-rpc/` + matching TS
+driver at `ts/packages/grpcx-bench/`) measured all nine RFC § 8
+gates on the Linux reference box. 5 of 9 are 1.1×–1.7× over the
+threshold; shmem throughput is 54× under; the opt-in io_uring path
+is 1.4× *slower* than the T4.1 blocking serve. Two single-lever
+tuning attempts (buffered streaming FrameReader, skip-zero-init on
+the metadata buffer) were measured and reverted — neither moved
+the numbers. The gap is **structural**, not a tuning miss. v1
+ships at measured numbers; the architectural rework (full io_uring
+SQPOLL event-loop server, pipelined shmem push) is the **v1.1 perf
+workstream**.
+
+---
+
 ## grpcx 0.25.0 — 2026-06-12
 
 The top-level RPC façade: unary / server-streaming / client-streaming /
@@ -319,6 +595,27 @@ and `grpcx/ws-mux` + TLS. Project v10.0 was released 2026-06-10.
 
 ---
 
+## grpcx-pb — Unreleased (internal-RPC v1)
+
+### Added
+- `codegen_ts(&Schema) -> String` — TypeScript backend emitter for
+  the protobuf schema (T1.2 of the internal-RPC v1 plan). Emits
+  self-contained `.ts` source with `@grpcx/core` / `@grpcx/native`
+  imports, message interfaces, descriptor tables, enum
+  declarations, a `class XxxClient` covering all four RPC kinds
+  (Promise / AsyncIterable), an `XxxHandler` interface, and the
+  server-side `registerXxx` function.
+- Rust codegen (`codegen`) now emits all three of `dispatch` /
+  `dispatch_streaming` / `dispatch_with_ctx`; generated
+  `XxxServer<T>` overrides `Service::dispatch_with_ctx` so
+  `CallContext::peer_cred()` threads through to handlers on the
+  v2 internal-RPC transports.
+- Generated client stubs are generic over the `grpcx::RpcChannel`
+  trait, working transparently over `ConnectedChannel` (v1) or
+  `UdsConnection` / `ShmemConnection` / `TcpMuxV2Connection` (v2).
+
+---
+
 ## grpcx-pb 1.5.0 — 2026-06-13
 
 `.proto` editions-2023 importer with proto2 and proto3 front-ends.
@@ -504,6 +801,31 @@ Zero-copy binary IDL — own wire format, no runtime dependencies.
 
 ---
 
+## grpcx-rt — Unreleased (internal-RPC v1 / T4.2 io_uring)
+
+### Added
+- `iouring` feature (Linux-only at the `cfg(target_os = "linux")`
+  level — no-op on non-Linux) — runtime-level wrappers around the
+  `grpcx-io` Linux io_uring primitives extended in T4.2.
+  - `UringRing::new(entries)` / `UringRing::new_sqpoll(entries,
+    cpu, idle_ms)` — owning ring handle with SQPOLL-aware submit
+    dispatch.
+  - `register_files` / `unregister_files` /
+    `register_buffers` / `unregister_buffers` —
+    `IORING_REGISTER_FILES` / `IORING_REGISTER_BUFFERS` plus
+    value-typed `FixedFileTable` / `RegisteredBuffers` records
+    for slot lookup.
+  - `submit_send` / `submit_send_fixed` / `submit_recv` /
+    `submit_recv_multishot` / `submit_linked_send_pair` — typed
+    SQE constructors covering the v2-frame hot path.
+  - `Completion` + `drain_cqes` — CQE drain helper.
+- `iouring_basic` test exercises every primitive (NOP, SQPOLL
+  setup with skip-on-EPERM, linked send over socketpair,
+  multishot recv with skip-on-`EINVAL`, fixed-file send via
+  registered slot) — 5/5 green on Linux 6.12.
+
+---
+
 ## grpcx-rt 1.0.0 — 2026-06-07
 
 Async runtime, channels, and timers — own scheduler, no `tokio`.
@@ -543,6 +865,32 @@ Async runtime, channels, and timers — own scheduler, no `tokio`.
 - Removed the stall panic; futures awaiting a cross-thread wake now
   block on `poll(None)` instead of panicking on "no runnable task +
   no io + no timer".
+
+---
+
+## grpcx-io — Unreleased (internal-RPC v1 / T4.2 io_uring)
+
+### Added (Linux io_uring primitive extensions)
+- `Ring::new_sqpoll(entries, cpu, idle_ms)` — SQPOLL +
+  `IORING_SETUP_SQ_AFF` ring construction; surfaces kernel
+  refusals (kernel < 5.11 without `CAP_SYS_NICE`, locked-down
+  kernels) as `IoErrorKind::BackendUnavailable` so callers have
+  a single fallback branch to `Ring::new`.
+- `Ring::submit_sqpoll(to_submit)` — fast-path submit that
+  checks `IORING_SQ_NEED_WAKEUP` and skips the syscall when the
+  kernel polling thread is awake.
+- `Ring::register_files` / `unregister_files` +
+  `Ring::register_buffers` / `unregister_buffers` —
+  `IORING_REGISTER_FILES` / `IORING_REGISTER_BUFFERS` plus their
+  unregister counterparts. The `io_uring_register` syscall
+  wrapper + `IoVec` struct are exposed at the raw layer.
+- `Sqe::send` / `Sqe::recv` / `Sqe::recv_multishot` — typed SQE
+  constructors for `IORING_OP_SEND` / `IORING_OP_RECV` plus the
+  multishot recv variant (kernel >= 6.0).
+- `Sqe::linked()` / `Sqe::with_fixed_file()` — builder
+  modifiers for `IOSQE_IO_LINK` (chain to the next SQE) and
+  `IOSQE_FIXED_FILE` (interpret the `fd` field as a registered
+  file-table index).
 
 ---
 

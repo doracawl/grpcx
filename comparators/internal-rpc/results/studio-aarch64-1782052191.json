@@ -1,0 +1,1 @@
+{"fingerprint": {"hostname": "studio", "os": "macos", "arch": "aarch64", "cpu_count": 16, "cargo_profile": "release", "git_sha": "2fccac3", "bench_timestamp": "1782052191"}, "config": {"samples": 10000, "payload": 64, "throughput_bytes": 200000000}, "shmem-throughput": {"bytes_moved": 200002560, "elapsed_ns": 4554625, "body_size": 3072, "throughput_gbps": 43.912}}

@@ -1,0 +1,19 @@
+{
+  "name": "@grpcx/core",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Public TypeScript surface for grpcx internal-RPC v2 (Connection, CallContext, Status). Native code lives in @grpcx/native.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist", "src"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "node --test dist/**/*.test.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "license": "Apache-2.0 OR MIT",
+  "publishConfig": {
+    "access": "public"
+  }
+}

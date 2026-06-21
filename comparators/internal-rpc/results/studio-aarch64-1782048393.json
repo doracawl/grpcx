@@ -1,0 +1,1 @@
+{"fingerprint": {"hostname": "studio", "os": "macos", "arch": "aarch64", "cpu_count": 16, "cargo_profile": "release", "git_sha": "2fccac3", "bench_timestamp": "1782048393"}, "config": {"samples": 10000, "payload": 64, "throughput_bytes": 1000000000}, "uds-rtt": {"samples": 10000, "min_ns": 3583, "median_ns": 5958, "p99_ns": 13292, "max_ns": 49208, "mean_ns": 6621}}

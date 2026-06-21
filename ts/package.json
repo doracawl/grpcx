@@ -1,0 +1,31 @@
+{
+  "name": "@grpcx/workspace",
+  "private": true,
+  "version": "0.0.0",
+  "description": "grpcx TypeScript packages (T2.2 internal-RPC v2 stack)",
+  "workspaces": [
+    "packages/grpcx-core",
+    "packages/grpcx-native",
+    "packages/grpcx-transport-uds",
+    "packages/grpcx-transport-shmem",
+    "packages/grpcx-transport-tcp-mux",
+    "packages/grpcx-bench"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "build:native": "npm run build --workspace @grpcx/native",
+    "test": "npm run test --workspaces --if-present",
+    "test:kat": "npm run test --workspace @grpcx/native",
+    "test:e2e": "node --test test/e2e_rust_uds_server.test.mjs",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "clean": "rm -rf packages/*/dist packages/*/build packages/*/prebuilds"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "@types/node": "^22.0.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

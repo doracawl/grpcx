@@ -21,9 +21,11 @@ use core::sync::atomic::{AtomicU32, Ordering};
 
 use super::{Cqe, Sqe};
 use crate::sys::linux::raw::{
-    self, IORING_ENTER_GETEVENTS, IORING_FEAT_SINGLE_MMAP, IORING_OFF_CQ_RING, IORING_OFF_SQ_RING,
-    IORING_OFF_SQES, IoUringCqe, IoUringParams, MAP_POPULATE, MAP_SHARED, PROT_READ, PROT_WRITE,
-    RawFd,
+    self, IORING_ENTER_GETEVENTS, IORING_ENTER_SQ_WAKEUP, IORING_FEAT_SINGLE_MMAP,
+    IORING_OFF_CQ_RING, IORING_OFF_SQ_RING, IORING_OFF_SQES, IORING_REGISTER_BUFFERS,
+    IORING_REGISTER_FILES, IORING_SETUP_SQ_AFF, IORING_SETUP_SQPOLL, IORING_SQ_NEED_WAKEUP,
+    IORING_UNREGISTER_BUFFERS, IORING_UNREGISTER_FILES, IoUringCqe, IoUringParams, IoVec,
+    MAP_POPULATE, MAP_SHARED, PROT_READ, PROT_WRITE, RawFd,
 };
 use crate::types::{IoError, IoErrorKind, IoResult};
 
@@ -103,7 +105,39 @@ impl Ring {
     /// io_uring at the seccomp layer, can transparently fall back to
     /// the epoll backend without distinguishing the failure mode.
     pub fn new(entries: u32) -> IoResult<Self> {
-        let mut params = IoUringParams::default();
+        Self::new_with_params(entries, IoUringParams::default())
+    }
+
+    /// Create a ring backed by a pinned SQPOLL kernel thread.
+    ///
+    /// Sets `IORING_SETUP_SQPOLL | IORING_SETUP_SQ_AFF`, pins the
+    /// polling thread to logical CPU `cpu`, and lets it sleep after
+    /// `idle_ms` of inactivity (the kernel then needs an
+    /// `IORING_ENTER_SQ_WAKEUP` to resume). When SQPOLL is active,
+    /// userspace can publish SQEs and skip the syscall entirely on
+    /// the fast path — see [`Self::submit_sqpoll`].
+    ///
+    /// SQPOLL on Linux kernels before 5.11 needs `CAP_SYS_NICE`; on
+    /// kernels 5.13 and later, unprivileged callers can use it when
+    /// the kernel was built with
+    /// `CONFIG_IO_URING_SQPOLL_UNPRIVILEGED=y`. When the kernel
+    /// refuses, this returns [`IoErrorKind::BackendUnavailable`] so
+    /// the caller can fall back to [`Self::new`] (no SQPOLL).
+    pub fn new_sqpoll(entries: u32, cpu: u32, idle_ms: u32) -> IoResult<Self> {
+        let mut params = IoUringParams {
+            flags: IORING_SETUP_SQPOLL | IORING_SETUP_SQ_AFF,
+            sq_thread_cpu: cpu,
+            sq_thread_idle: idle_ms,
+            ..IoUringParams::default()
+        };
+        // Older kernels reject the SQ_AFF + cpu pair when the cpu is
+        // offline / out of range — surface that as
+        // `BackendUnavailable` too, so the caller has a single
+        // fallback branch.
+        Self::new_with_params(entries, core::mem::take(&mut params))
+    }
+
+    fn new_with_params(entries: u32, mut params: IoUringParams) -> IoResult<Self> {
         let fd = match raw::io_uring_setup(entries, &mut params) {
             Ok(fd) => fd,
             Err(e) => {
@@ -286,6 +320,103 @@ impl Ring {
     /// `min_complete` CQEs are available.
     pub fn submit_and_wait(&self, to_submit: u32, min_complete: u32) -> IoResult<i32> {
         raw::io_uring_enter(self.fd, to_submit, min_complete, IORING_ENTER_GETEVENTS)
+    }
+
+    /// Fast-path submit for SQPOLL rings: skip the syscall when the
+    /// kernel polling thread is awake. Returns the number of SQEs
+    /// the kernel consumed (0 if the thread was awake and picked
+    /// them up without needing a wakeup).
+    ///
+    /// On a non-SQPOLL ring this is identical to [`Self::submit`]
+    /// since the `IORING_SQ_NEED_WAKEUP` flag is never set by the
+    /// kernel; callers should still prefer the named API for
+    /// readability.
+    pub fn submit_sqpoll(&self, to_submit: u32) -> IoResult<i32> {
+        // SAFETY: `sq_off.flags` is a u32-aligned byte offset inside
+        // the SQ-ring mapping; the returned reference's lifetime is
+        // bounded by `&self` and the mapping outlives the borrow.
+        let flags: &AtomicU32 = unsafe { atomic_at(self.sq_ring_ptr, self.params.sq_off.flags) };
+        let sq_flags = flags.load(Ordering::Acquire);
+        if (sq_flags & IORING_SQ_NEED_WAKEUP) != 0 {
+            raw::io_uring_enter(self.fd, to_submit, 0, IORING_ENTER_SQ_WAKEUP)
+        } else {
+            Ok(to_submit as i32)
+        }
+    }
+
+    /// Register a file-descriptor table with the ring
+    /// (`IORING_REGISTER_FILES`). Subsequent SQEs flagged with
+    /// [`Sqe::with_fixed_file`] interpret their `fd` field as an
+    /// index into this table.
+    ///
+    /// Pass an empty slice to register a zero-length table (rare;
+    /// useful only as a placeholder).
+    ///
+    /// [`Sqe::with_fixed_file`]: super::Sqe::with_fixed_file
+    pub fn register_files(&self, fds: &[RawFd]) -> IoResult<()> {
+        let ptr = if fds.is_empty() {
+            0
+        } else {
+            fds.as_ptr() as usize
+        };
+        // SAFETY: `fds` lives for the syscall duration; the kernel
+        // copies the table into its own storage before returning.
+        unsafe {
+            raw::io_uring_register(self.fd, IORING_REGISTER_FILES, ptr, fds.len() as u32)
+                .map(|_| ())
+        }
+    }
+
+    /// Drop the registered file table.
+    pub fn unregister_files(&self) -> IoResult<()> {
+        // SAFETY: `IORING_UNREGISTER_FILES` reads no arg pointer.
+        unsafe { raw::io_uring_register(self.fd, IORING_UNREGISTER_FILES, 0, 0).map(|_| ()) }
+    }
+
+    /// Register a buffer-iovec table with the ring
+    /// (`IORING_REGISTER_BUFFERS`). Pairs with the
+    /// fixed-buffer-flavoured read / write ops (kernel >= 5.1) for
+    /// the cost of one copy per syscall.
+    ///
+    /// `bufs` is a sequence of `(ptr, len)` pairs describing pinned
+    /// userspace regions; each region must remain valid until the
+    /// matching [`Self::unregister_buffers`] (or ring drop).
+    ///
+    /// # Safety
+    ///
+    /// Every `(ptr, len)` slice must satisfy
+    /// [`core::slice::from_raw_parts_mut`]'s validity contract for
+    /// the entire lifetime of the registration. The kernel may write
+    /// to any registered region in response to a fixed-buffer read.
+    pub unsafe fn register_buffers(&self, bufs: &[(*mut u8, usize)]) -> IoResult<()> {
+        // Build an `IoVec` array on the stack-of-allocator's choice;
+        // `Vec` works because `no_std + alloc`. The table is freed at
+        // the end of this call — the kernel copies it.
+        let iovecs: alloc::vec::Vec<IoVec> = bufs
+            .iter()
+            .map(|(base, len)| IoVec {
+                iov_base: *base,
+                iov_len: *len,
+            })
+            .collect();
+        let ptr = if iovecs.is_empty() {
+            0
+        } else {
+            iovecs.as_ptr() as usize
+        };
+        // SAFETY: `iovecs` lives for the syscall duration; kernel
+        // copies the table. Caller-side validity of each iov_base /
+        // iov_len pair is the documented contract above.
+        unsafe {
+            raw::io_uring_register(self.fd, IORING_REGISTER_BUFFERS, ptr, iovecs.len() as u32)
+                .map(|_| ())
+        }
+    }
+
+    /// Drop the registered buffer table.
+    pub fn unregister_buffers(&self) -> IoResult<()> {
+        // SAFETY: `IORING_UNREGISTER_BUFFERS` reads no arg pointer.
+        unsafe { raw::io_uring_register(self.fd, IORING_UNREGISTER_BUFFERS, 0, 0).map(|_| ()) }
     }
 
     /// Drain every available CQE, invoking `f` on each. Returns the

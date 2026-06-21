@@ -1,0 +1,27 @@
+[package]
+name = "internal-rpc-bench"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "T5.4 bench harness — exercises every RFC § 8 gate (shmem RTT, shmem throughput, UDS RTT, tcp-mux-v2 RTT, grpcx-pb codegen) and emits a JSON result file with a hardware fingerprint. Bench-only; never a runtime dependency of any grpcx-* crate."
+license = "Apache-2.0 OR MIT"
+
+[lints]
+workspace = true
+
+[dependencies]
+# `transport-tcp-mux-iouring` is opt-in at the call-site
+# but a no-op on non-Linux targets, so it's safe to bake
+# into the bench's feature set unconditionally. The bench
+# exercises both the SQPOLL server (v1.1) and the SQPOLL
+# client (v1.1.1) when running on a kernel that supports it.
+grpcx = { path = "../../crates/grpcx", features = [
+  "transport-shmem",
+  "transport-tcp-mux",
+  "transport-tcp-mux-iouring",
+] }
+grpcx-pb = { path = "../../crates/grpcx-pb" }
+
+[[bin]]
+name = "internal-rpc-bench"
+path = "src/main.rs"

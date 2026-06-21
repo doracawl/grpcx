@@ -831,7 +831,7 @@ fn emit_client_method(em: &mut Emitter, full_name: &str, m: &crate::MethodDef) {
 
     em.line(&alloc::format!("/// `{}` rpc.", m.name));
     em.open_block(&alloc::format!(
-        "pub fn {fn_name}(conn: &mut ::grpcx::ConnectedChannel, ctx: &mut ::grpcx::CallContext, {params}) -> {ret} {{"
+        "pub fn {fn_name}<C: ::grpcx::RpcChannel>(conn: &mut C, ctx: &mut ::grpcx::CallContext, {params}) -> {ret} {{"
     ));
     em.line(&alloc::format!(
         "let __method = ::grpcx::Method {{ service: ::grpcx_pb::alloc::string::String::from(\"{full_name}\"), method: ::grpcx_pb::alloc::string::String::from(\"{}\"), kind: ::grpcx::RpcKind::{kind} }};",
@@ -900,19 +900,37 @@ fn emit_handler_sig(em: &mut Emitter, m: &crate::MethodDef, in_trait: bool) {
 }
 
 fn emit_dispatch_bridge(em: &mut Emitter, svc: &crate::ServiceDef) {
-    // dispatch: unary entry (streaming methods answer
-    // Unimplemented here; the transport calls
-    // dispatch_streaming for everything anyway).
+    // `dispatch` — single-message unary entry. Bridges
+    // through `dispatch_with_ctx` so peer_cred / ctx
+    // semantics stay consistent across transports.
     em.open_block("fn dispatch(&self, method: &str, metadata: &::grpcx::Metadata, request: &[u8]) -> Result<(::grpcx_pb::alloc::vec::Vec<u8>, ::grpcx::Metadata), ::grpcx::RpcError> {");
     em.line("let mut __reqs = ::grpcx_pb::alloc::vec::Vec::new();");
     em.line("__reqs.push(request.to_vec());");
-    em.line("let (mut __resps, __meta) = ::grpcx::Service::dispatch_streaming(self, method, metadata, &__reqs)?;");
-    em.line("Ok((__resps.pop().unwrap_or_default(), __meta))");
+    em.line("let mut __ctx = ::grpcx::CallContext::new(metadata.clone());");
+    em.line("let mut __resps = <Self as ::grpcx::Service>::dispatch_with_ctx(self, method, &mut __ctx, &__reqs)?;");
+    em.line("Ok((__resps.pop().unwrap_or_default(), __ctx.into_trailing()))");
     em.close_block("}");
     em.blank();
 
+    // `dispatch_streaming` — v1 transport entry
+    // (h2c / h2-tls / h3 / tcp-mux v1 / ws-mux). Owns
+    // its own `CallContext` (peer_cred unavailable on
+    // these transports) and delegates to the shared
+    // `dispatch_with_ctx` body so there is exactly one
+    // copy of the method-match table.
     em.open_block("fn dispatch_streaming(&self, method: &str, metadata: &::grpcx::Metadata, requests: &[::grpcx_pb::alloc::vec::Vec<u8>]) -> Result<(::grpcx_pb::alloc::vec::Vec<::grpcx_pb::alloc::vec::Vec<u8>>, ::grpcx::Metadata), ::grpcx::RpcError> {");
     em.line("let mut __ctx = ::grpcx::CallContext::new(metadata.clone());");
+    em.line("let __resps = <Self as ::grpcx::Service>::dispatch_with_ctx(self, method, &mut __ctx, requests)?;");
+    em.line("Ok((__resps, __ctx.into_trailing()))");
+    em.close_block("}");
+    em.blank();
+
+    // `dispatch_with_ctx` — v2 transport entry
+    // (transport-uds, transport-shmem). The caller
+    // owns the `CallContext` and pre-populates
+    // `peer_cred`; we thread it into the handler call
+    // and write trailing metadata back through `ctx`.
+    em.open_block("fn dispatch_with_ctx(&self, method: &str, __ctx: &mut ::grpcx::CallContext, requests: &[::grpcx_pb::alloc::vec::Vec<u8>]) -> Result<::grpcx_pb::alloc::vec::Vec<::grpcx_pb::alloc::vec::Vec<u8>>, ::grpcx::RpcError> {");
     em.open_block("match method {");
     for m in &svc.methods {
         emit_dispatch_arm(em, m);
@@ -933,9 +951,11 @@ fn emit_dispatch_arm(em: &mut Emitter, m: &crate::MethodDef) {
         em.line("let __first: &[u8] = requests.first().map(|v| v.as_slice()).unwrap_or(&[]);");
         em.line("let __in = ::grpcx_pb::ProtoCodec::decode(__first).map_err(|_| ::grpcx::RpcError::Status(::grpcx::Status { code: ::grpcx::StatusCode::InvalidArgument, message: ::grpcx_pb::alloc::string::String::from(\"request decode\") }))?;");
     }
-    // Call handler.
+    // Call handler. `__ctx` is the caller-owned
+    // `CallContext` carrying request metadata + peer
+    // credentials in, trailing metadata out.
     em.line(&alloc::format!(
-        "let __out = self.0.{fn_name}(__in, &mut __ctx).map_err(::grpcx::RpcError::Status)?;"
+        "let __out = self.0.{fn_name}(__in, __ctx).map_err(::grpcx::RpcError::Status)?;"
     ));
     // Encode response(s).
     if m.server_streaming {
@@ -945,7 +965,7 @@ fn emit_dispatch_arm(em: &mut Emitter, m: &crate::MethodDef) {
         em.line("::grpcx_pb::ProtoCodec::encode(&__out, &mut __b);");
         em.line("let __resps = ::grpcx_pb::alloc::vec![__b];");
     }
-    em.line("Ok((__resps, __ctx.into_trailing()))");
+    em.line("Ok(__resps)");
     em.close_block("}");
 }
 

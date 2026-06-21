@@ -1,0 +1,20 @@
+{
+  "name": "@grpcx/bench",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "T5.4 TS-side bench harness — exercises the two TS+N-API gates from RFC § 8 (shmem unary RTT, UDS unary RTT). Spawns the Rust example servers, drives them from the TS transport packages, emits a JSON result file with a hardware fingerprint.",
+  "main": "src-ts/index.mjs",
+  "files": ["src-ts"],
+  "scripts": {
+    "bench": "node src-ts/index.mjs --gate all",
+    "bench:shmem": "node src-ts/index.mjs --gate shmem-rtt",
+    "bench:uds": "node src-ts/index.mjs --gate uds-rtt"
+  },
+  "dependencies": {
+    "@grpcx/core": "0.1.0",
+    "@grpcx/transport-uds": "0.1.0",
+    "@grpcx/transport-shmem": "0.1.0"
+  },
+  "license": "Apache-2.0 OR MIT"
+}

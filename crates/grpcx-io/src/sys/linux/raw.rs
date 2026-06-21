@@ -36,6 +36,7 @@ pub(crate) mod nr {
     pub(crate) const SENDMMSG: usize = 307;
     pub(crate) const IO_URING_SETUP: usize = 425;
     pub(crate) const IO_URING_ENTER: usize = 426;
+    pub(crate) const IO_URING_REGISTER: usize = 427;
 }
 
 #[cfg(target_arch = "aarch64")]
@@ -58,6 +59,7 @@ pub(crate) mod nr {
     // io_uring numbers are identical on x86_64 and aarch64.
     pub(crate) const IO_URING_SETUP: usize = 425;
     pub(crate) const IO_URING_ENTER: usize = 426;
+    pub(crate) const IO_URING_REGISTER: usize = 427;
 }
 
 // ============================================================
@@ -112,8 +114,49 @@ pub(crate) const IORING_OFF_SQES: i64 = 0x10000000;
 /// is set in `IoUringParams::features` (kernels >= 5.4).
 pub(crate) const IORING_FEAT_SINGLE_MMAP: u32 = 1 << 0;
 
+/// `IoUringParams::flags` — kernel runs a polling thread that drains
+/// the SQ ring without userspace having to `io_uring_enter` for every
+/// submit. Requires CAP_SYS_NICE (< 5.11) / CAP_SYS_RESOURCE (>= 5.13)
+/// or an unprivileged caller on kernels with the May-2021 relaxation.
+pub(crate) const IORING_SETUP_SQPOLL: u32 = 1 << 1;
+/// `IoUringParams::flags` — pin the SQPOLL thread to
+/// `IoUringParams::sq_thread_cpu` (only meaningful with
+/// `IORING_SETUP_SQPOLL`).
+pub(crate) const IORING_SETUP_SQ_AFF: u32 = 1 << 2;
+
 /// `io_uring_enter` flag: also reap completions, not just submit.
 pub(crate) const IORING_ENTER_GETEVENTS: u32 = 1 << 0;
+/// `io_uring_enter` flag: wake the SQPOLL kernel thread if it has
+/// gone to sleep waiting for new SQEs (only meaningful with
+/// `IORING_SETUP_SQPOLL`).
+pub(crate) const IORING_ENTER_SQ_WAKEUP: u32 = 1 << 1;
+
+/// SQ ring `flags` field bit: the kernel SQPOLL thread is sleeping
+/// and userspace must call `io_uring_enter(..., IORING_ENTER_SQ_WAKEUP)`
+/// to nudge it. Polled with `Acquire` on every submit batch.
+pub(crate) const IORING_SQ_NEED_WAKEUP: u32 = 1 << 0;
+
+/// `io_uring_register` opcode: register an iovec buffer table.
+pub(crate) const IORING_REGISTER_BUFFERS: u32 = 0;
+/// `io_uring_register` opcode: unregister the iovec buffer table.
+pub(crate) const IORING_UNREGISTER_BUFFERS: u32 = 1;
+/// `io_uring_register` opcode: register a file descriptor table.
+pub(crate) const IORING_REGISTER_FILES: u32 = 2;
+/// `io_uring_register` opcode: unregister the file descriptor table.
+pub(crate) const IORING_UNREGISTER_FILES: u32 = 3;
+
+/// SQE `flags` bit: the fd field is an index into the registered file
+/// table rather than a raw kernel file descriptor (`IOSQE_FIXED_FILE`).
+pub(crate) const IOSQE_FIXED_FILE: u8 = 1 << 0;
+/// SQE `flags` bit: link this SQE to the next one — the next does not
+/// start until this completes successfully (`IOSQE_IO_LINK`).
+pub(crate) const IOSQE_IO_LINK: u8 = 1 << 2;
+
+/// `IoUringSqe::ioprio` bit for recv/recvmsg ops: enable multishot —
+/// the kernel reposts completions for the same SQE until cancelled or
+/// the socket errors. Kernels >= 5.19 for `RECVMSG_MULTISHOT`, >= 6.0
+/// for plain `RECV_MULTISHOT`.
+pub(crate) const IORING_RECV_MULTISHOT: u16 = 1 << 1;
 
 /// io_uring opcode: no-op, used by smoke tests.
 pub(crate) const IORING_OP_NOP: u8 = 0;
@@ -121,6 +164,11 @@ pub(crate) const IORING_OP_NOP: u8 = 0;
 pub(crate) const IORING_OP_READ: u8 = 22;
 /// io_uring opcode: `write(fd, buf, len)` equivalent.
 pub(crate) const IORING_OP_WRITE: u8 = 23;
+/// io_uring opcode: `send(fd, buf, len, flags)` equivalent.
+pub(crate) const IORING_OP_SEND: u8 = 26;
+/// io_uring opcode: `recv(fd, buf, len, flags)` equivalent. Pair with
+/// `IORING_RECV_MULTISHOT` in `ioprio` for multishot mode.
+pub(crate) const IORING_OP_RECV: u8 = 27;
 
 // ============================================================
 // epoll_event layout.
@@ -607,6 +655,55 @@ pub(crate) fn io_uring_enter(
     };
     from_syscall_ret(ret).map(|n| n as i32)
 }
+
+/// `io_uring_register(fd, opcode, arg, nr_args)`.
+///
+/// Generic kernel hook for ring-scoped table registration: buffer
+/// vectors (`IORING_REGISTER_BUFFERS`), file tables
+/// (`IORING_REGISTER_FILES`), and their unregister counterparts.
+///
+/// `arg` is a kernel-typed pointer (`*const iovec` for `BUFFERS`,
+/// `*const RawFd` for `FILES`); `nr_args` is the entry count. Callers
+/// must keep the pointed-to memory live for the syscall duration.
+///
+/// # Safety
+///
+/// `arg` must satisfy the opcode-specific kernel ABI: either a valid
+/// pointer to `nr_args` entries of the right type, or NULL (with
+/// `nr_args = 0`) for the unregister opcodes. The kernel does not
+/// retain the pointer after the call returns.
+pub(crate) unsafe fn io_uring_register(
+    fd: RawFd,
+    opcode: u32,
+    arg: usize,
+    nr_args: u32,
+) -> IoResult<i32> {
+    // SAFETY: contract delegated to the caller (per the opcode's kernel
+    // ABI). The kernel reads `arg` only during the syscall.
+    let ret = unsafe {
+        syscall4(
+            nr::IO_URING_REGISTER,
+            fd as usize,
+            opcode as usize,
+            arg,
+            nr_args as usize,
+        )
+    };
+    from_syscall_ret(ret).map(|n| n as i32)
+}
+
+/// Kernel `iovec` struct — `(base, len)` pair used by
+/// `IORING_REGISTER_BUFFERS` and the scatter-gather syscalls.
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub(crate) struct IoVec {
+    pub(crate) iov_base: *mut u8,
+    pub(crate) iov_len: usize,
+}
+
+// SAFETY: `IoVec` is a plain `repr(C)` POD with no Drop; the raw
+// pointer is opaque kernel input, no thread-shared mutability.
+unsafe impl Send for IoVec {}
 
 /// `mmap(addr, len, prot, flags, fd, offset)`.
 ///

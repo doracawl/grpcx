@@ -7,6 +7,19 @@ target-*/
 **/Cargo.lock.bak
 /Cargo.lock
 
+# Node / TypeScript build artifacts
+node_modules/
+ts/packages/*/lib/
+ts/packages/*/dist/
+ts/packages/*/build/
+ts/packages/*/*.tsbuildinfo
+*.tsbuildinfo
+ts/packages/grpcx-bench/results/
+
+# Native addon build artifacts
+ts/packages/grpcx-native/build/
+*.node
+
 # OS
 .DS_Store
 *.swp

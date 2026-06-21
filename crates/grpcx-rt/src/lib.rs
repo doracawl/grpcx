@@ -28,6 +28,8 @@ extern crate alloc;
 mod channel;
 mod deque;
 mod executor;
+#[cfg(all(feature = "iouring", target_os = "linux"))]
+pub mod iouring;
 mod runtime;
 mod timer;
 

@@ -6,7 +6,8 @@
 //! without breaking the public API.
 
 use crate::sys::linux::raw::{
-    IORING_OP_NOP, IORING_OP_READ, IORING_OP_WRITE, IoUringCqe, IoUringSqe, RawFd,
+    IORING_OP_NOP, IORING_OP_READ, IORING_OP_RECV, IORING_OP_SEND, IORING_OP_WRITE,
+    IORING_RECV_MULTISHOT, IOSQE_FIXED_FILE, IOSQE_IO_LINK, IoUringCqe, IoUringSqe, RawFd,
 };
 
 /// io_uring submission-queue entry — a fully-formed work item ready
@@ -90,6 +91,116 @@ impl Sqe {
             user_data,
             ..IoUringSqe::default()
         })
+    }
+
+    /// Build a `SEND` SQE.
+    ///
+    /// The kernel sends up to `len` bytes from `buf` over the
+    /// stream-oriented socket `fd`. `flags` mirrors `send(2)` flags
+    /// (`MSG_NOSIGNAL` is the common choice; pass `0` for the default).
+    /// `user_data` echoes back in the CQE.
+    ///
+    /// # Safety
+    ///
+    /// `buf` must remain valid for `len` bytes of reads from the time
+    /// [`Ring::push_sqe`] returns until the matching [`Cqe`] has been
+    /// observed via [`Ring::reap_cqes`].
+    ///
+    /// [`Ring::push_sqe`]: super::Ring::push_sqe
+    /// [`Ring::reap_cqes`]: super::Ring::reap_cqes
+    #[inline]
+    pub unsafe fn send(fd: RawFd, buf: *const u8, len: u32, flags: u32, user_data: u64) -> Self {
+        Self(IoUringSqe {
+            opcode: IORING_OP_SEND,
+            fd,
+            addr: buf as u64,
+            len,
+            op_flags: flags,
+            user_data,
+            ..IoUringSqe::default()
+        })
+    }
+
+    /// Build a `RECV` SQE.
+    ///
+    /// The kernel reads up to `len` bytes from the stream-oriented
+    /// socket `fd` into `buf`. `flags` mirrors `recv(2)` flags
+    /// (`0` for default).
+    ///
+    /// # Safety
+    ///
+    /// `buf` must remain valid for `len` bytes of writes for the same
+    /// duration as in [`Sqe::send`].
+    #[inline]
+    pub unsafe fn recv(fd: RawFd, buf: *mut u8, len: u32, flags: u32, user_data: u64) -> Self {
+        Self(IoUringSqe {
+            opcode: IORING_OP_RECV,
+            fd,
+            addr: buf as u64,
+            len,
+            op_flags: flags,
+            user_data,
+            ..IoUringSqe::default()
+        })
+    }
+
+    /// Build a multishot `RECV` SQE.
+    ///
+    /// The kernel reposts a CQE every time bytes arrive on `fd` until
+    /// it errors or is explicitly cancelled, without the caller having
+    /// to resubmit. Requires kernel >= 6.0; on older kernels the
+    /// completion arrives with `res = -EINVAL`.
+    ///
+    /// Without a registered buffer pool (`BUF_RING`), each completion
+    /// writes into the single caller-provided buffer — useful for
+    /// smoke tests; production callers should pair this with the
+    /// buffer-select path once it lands.
+    ///
+    /// # Safety
+    ///
+    /// Same as [`Sqe::recv`], but the buffer must stay live across the
+    /// **entire** multishot lifecycle, not just the first CQE.
+    #[inline]
+    pub unsafe fn recv_multishot(
+        fd: RawFd,
+        buf: *mut u8,
+        len: u32,
+        flags: u32,
+        user_data: u64,
+    ) -> Self {
+        Self(IoUringSqe {
+            opcode: IORING_OP_RECV,
+            fd,
+            addr: buf as u64,
+            len,
+            op_flags: flags,
+            user_data,
+            ioprio: IORING_RECV_MULTISHOT,
+            ..IoUringSqe::default()
+        })
+    }
+
+    /// Set the `IOSQE_IO_LINK` flag — the next SQE pushed onto the
+    /// ring will not start until this one completes successfully (a
+    /// non-zero `res` short-circuits the chain with `-ECANCELED` on
+    /// the linked entry).
+    #[inline]
+    #[must_use]
+    pub fn linked(mut self) -> Self {
+        self.0.flags |= IOSQE_IO_LINK;
+        self
+    }
+
+    /// Set the `IOSQE_FIXED_FILE` flag — the `fd` field is interpreted
+    /// as a slot index into the registered file table
+    /// ([`Ring::register_files`]) rather than a raw kernel fd.
+    ///
+    /// [`Ring::register_files`]: super::Ring::register_files
+    #[inline]
+    #[must_use]
+    pub fn with_fixed_file(mut self) -> Self {
+        self.0.flags |= IOSQE_FIXED_FILE;
+        self
     }
 
     /// Borrow the inner kernel struct. `pub(crate)`-only; the public

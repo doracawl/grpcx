@@ -1,0 +1,23 @@
+{
+  "name": "@grpcx/transport-shmem",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "grpcx transport-shmem client — shared-memory ring transport. Thin TypeScript surface over @grpcx/native.",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "files": ["lib", "src-ts"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test test/*.test.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@grpcx/core": "0.1.0",
+    "@grpcx/native": "0.1.0"
+  },
+  "license": "Apache-2.0 OR MIT",
+  "publishConfig": {
+    "access": "public"
+  }
+}

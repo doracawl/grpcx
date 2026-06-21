@@ -10,6 +10,47 @@ WebSocket (`grpcx/ws-mux`) transports. The
 **top-of-stack** layer that knits L4-L9 together; no
 `tonic`, no `prost`, no `hyper`.
 
+## Quickstart — same-host internal RPC
+
+The shortest path from a `.proto` to a working RPC:
+see [`examples/internal_rpc.rs`](examples/internal_rpc.rs).
+A runnable, copy-paste-ready template for an in-house
+service over the `grpcx/tcp-mux` transport — no TLS,
+no HTTP, no handshake on the wire.
+
+```bash
+cargo run --release --example internal_rpc \
+    --no-default-features --features transport-tcp-mux
+```
+
+It covers all four `RpcKind` variants (unary / server-
+stream / client-stream / bidi), request + trailing
+metadata, and the `RpcError::Status` error path in one
+self-contained file. To split into separate server /
+client binaries, lift the `std::thread::spawn { ...
+listen_tcp_mux_until ... }` block into a `bin/`
+target.
+
+**Transport choice.** Four feature flags map to four
+wire formats:
+
+| Feature              | Transport      | TLS | HTTP | Use when                                |
+|----------------------|----------------|-----|------|------------------------------------------|
+| `transport-tcp-mux`  | bare TCP mux   | —   | —    | Same-host / trusted-LAN internal RPC.    |
+| `transport-h2`       | h2c            | —   | h2   | Interop with `tonic` / `grpc-go` / `grpc-java`. |
+| `transport-h2-tls`   | h2 over TLS    | ✓   | h2   | Cross-host gRPC interop with TLS.        |
+| `transport-h3`       | QUIC + H/3     | ✓   | h3   | The grpcx-native cross-host path.        |
+
+**Internal-RPC path (planned, v1).** Same-host /
+trusted-LAN deployments get a perf-first / weak-security
+path: shared-memory ringbuf (~1 µs RTT) for same-host
+Rust↔Rust, AF_UNIX (~10 µs) for same-host TS↔Rust,
+io_uring-upgraded tcp-mux (~15 µs) for trusted LAN.
+One wire format, three transports, Rust + TS day-1. See
+[`../../_dev/RFC-internal-rpc-arch.md`](../../_dev/RFC-internal-rpc-arch.md)
+for the full design, threat model, and v1 delivery
+plan.
+
 ## Status (v0.1 — API skeleton)
 
 API skeleton + design docs synced 2026-06-10. The public

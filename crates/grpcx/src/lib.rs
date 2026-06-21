@@ -72,6 +72,13 @@ mod transport_common;
 mod transport_h2;
 #[cfg(feature = "transport-h3")]
 mod transport_h3;
+#[cfg(feature = "transport-shmem")]
+pub mod transport_shmem;
+#[cfg(feature = "transport-tcp-mux")]
+mod transport_tcp_mux_v2;
+#[cfg(feature = "transport-uds")]
+mod transport_uds;
+pub mod wire_v2;
 #[cfg(feature = "transport-ws-mux")]
 mod wsmux;
 
@@ -109,6 +116,12 @@ pub use transport_h3::{
     BidiCall, ClientStreamingCall, ServerConn, ServerStreamingCall, StreamEvent, UdpTransport,
     UnaryCall,
 };
+#[cfg(feature = "transport-shmem")]
+pub use transport_shmem::ShmemConnection;
+#[cfg(feature = "transport-tcp-mux")]
+pub use transport_tcp_mux_v2::{TcpMuxV2Connection, TcpMuxV2ServerConn};
+#[cfg(feature = "transport-uds")]
+pub use transport_uds::{UdsConnection, UdsServerConn};
 #[cfg(feature = "transport-ws-mux")]
 pub use wsmux::{WsMuxServerConn, WsUnaryCall};
 
@@ -173,6 +186,90 @@ pub trait Service {
         let (resp, meta) = self.dispatch(method, metadata, first)?;
         Ok((alloc::vec![resp], meta))
     }
+
+    /// V2 ctx-aware dispatch — the entry point used by
+    /// the v2 internal-RPC transports (`transport-uds` /
+    /// `transport-shmem`). `ctx` arrives populated with
+    /// the incoming request metadata **and** the
+    /// kernel-attested [`PeerCred`] (when available);
+    /// the handler must place the trailing metadata back
+    /// onto `ctx` before returning.
+    ///
+    /// Default implementation delegates to
+    /// [`dispatch_streaming`](Self::dispatch_streaming),
+    /// transparently forwarding metadata both directions
+    /// and discarding the peer credentials —
+    /// appropriate for non-codegen `Service` impls.
+    /// Codegen wrappers override this to thread `ctx`
+    /// (including `peer_cred`) into the generated
+    /// handler call.
+    fn dispatch_with_ctx(
+        &self,
+        method: &str,
+        ctx: &mut CallContext,
+        requests: &[Vec<u8>],
+    ) -> Result<Vec<Vec<u8>>, RpcError> {
+        let meta_in = ctx.request_metadata().clone();
+        let (resp, trailing) = self.dispatch_streaming(method, &meta_in, requests)?;
+        ctx.set_trailing(trailing);
+        Ok(resp)
+    }
+}
+
+// ============================================================
+// Transport-agnostic client channel.
+// ============================================================
+
+/// Client-side abstraction over an open transport
+/// connection. Lets generated `Client` stubs dispatch
+/// RPCs without binding to any specific transport — the
+/// existing v1 [`ConnectedChannel`] (h2c / h2-tls / h3 /
+/// ws-mux / tcp-mux v1) and the v2 [`UdsConnection`] both
+/// implement this trait.
+///
+/// Cross-transport client codegen targets this trait;
+/// concrete transports implement it as thin wrappers
+/// over their native methods.
+#[cfg(any(
+    feature = "transport-h3",
+    feature = "transport-ws-mux",
+    feature = "transport-h2",
+    feature = "transport-tcp-mux",
+    feature = "transport-uds"
+))]
+pub trait RpcChannel {
+    /// Issue a unary RPC. Returns the response bytes and
+    /// trailing metadata, or an [`RpcError`].
+    fn call_unary(
+        &mut self,
+        method: &Method,
+        metadata: &Metadata,
+        request: &[u8],
+    ) -> Result<(Vec<u8>, Metadata), RpcError>;
+
+    /// Issue a server-streaming RPC.
+    fn call_server_streaming(
+        &mut self,
+        method: &Method,
+        metadata: &Metadata,
+        request: &[u8],
+    ) -> Result<(Vec<Vec<u8>>, Metadata), RpcError>;
+
+    /// Issue a client-streaming RPC.
+    fn call_client_streaming(
+        &mut self,
+        method: &Method,
+        metadata: &Metadata,
+        requests: &[&[u8]],
+    ) -> Result<(Vec<u8>, Metadata), RpcError>;
+
+    /// Issue a bidirectional-streaming RPC.
+    fn call_bidi(
+        &mut self,
+        method: &Method,
+        metadata: &Metadata,
+        requests: &[&[u8]],
+    ) -> Result<(Vec<Vec<u8>>, Metadata), RpcError>;
 }
 
 /// Per-RPC metadata identifying the service + method +
@@ -307,15 +404,42 @@ pub struct Metadata {
     pub headers: Vec<(String, Vec<u8>)>,
 }
 
-/// Per-call server-side context — the request metadata in,
-/// the trailing metadata out. The repair for tonic's
+/// Kernel-attested credentials of the connection peer.
+///
+/// Populated for the `transport-uds` / `transport-shmem`
+/// transports — where the peer side of the AF_UNIX
+/// rendezvous socket has a kernel-known `uid` / `gid` /
+/// `pid` — and left `None` for `transport-tcp-mux` /
+/// `transport-h2c` / `transport-h2-tls` / `transport-h3`
+/// where no kernel-attested identity exists.
+///
+/// `gid` and `pid` are platform-dependent: Linux's
+/// `SO_PEERCRED` yields all three; Darwin / FreeBSD's
+/// `getpeereid(3)` yields `uid` + `gid` but not `pid`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PeerCred {
+    /// Kernel-attested effective uid of the peer.
+    pub uid: u32,
+    /// Kernel-attested effective gid of the peer, if the
+    /// platform provides it.
+    pub gid: Option<u32>,
+    /// Kernel-attested pid of the peer, if the platform
+    /// provides it (Linux yes; Darwin / FreeBSD no).
+    pub pid: Option<i32>,
+}
+
+/// Per-call server-side context — the request metadata
+/// in, the trailing metadata out, plus a typed slot for
+/// kernel-attested [`PeerCred`] when the transport
+/// supplies one. The repair for tonic's
 /// `Request<T>`/`Response<T>` wrapper noise (docs/dx-scope.md
-/// § P2): generated handlers take the message directly plus
-/// `&mut CallContext`.
+/// § P2): generated handlers take the message directly
+/// plus `&mut CallContext`.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct CallContext {
     request: Metadata,
     trailing: Metadata,
+    peer_cred: Option<PeerCred>,
 }
 
 impl CallContext {
@@ -324,6 +448,7 @@ impl CallContext {
         CallContext {
             request,
             trailing: Metadata::default(),
+            peer_cred: None,
         }
     }
 
@@ -384,6 +509,23 @@ impl CallContext {
     /// [`add_trailing`](Self::add_trailing) instead.
     pub fn set_trailing(&mut self, trailing: Metadata) {
         self.trailing = trailing;
+    }
+
+    /// Kernel-attested credentials of the connection
+    /// peer, when the transport supplies them
+    /// (`transport-uds` / `transport-shmem`). `None` on
+    /// the network transports (`transport-tcp-mux` /
+    /// `transport-h2c` / `transport-h2-tls` /
+    /// `transport-h3`).
+    pub fn peer_cred(&self) -> Option<&PeerCred> {
+        self.peer_cred.as_ref()
+    }
+
+    /// Transport plumbing — populated by the server-side
+    /// accept path on UDS / shmem before the handler
+    /// runs. Application handlers must not call this.
+    pub fn set_peer_cred(&mut self, peer_cred: Option<PeerCred>) {
+        self.peer_cred = peer_cred;
     }
 }
 
@@ -644,7 +786,8 @@ impl Server {
         feature = "transport-h3",
         feature = "transport-ws-mux",
         feature = "transport-h2",
-        feature = "transport-tcp-mux"
+        feature = "transport-tcp-mux",
+        feature = "transport-uds"
     ))]
     pub(crate) fn find_service(&self, name: &str) -> Option<&(dyn Service + Send + Sync)> {
         self.services

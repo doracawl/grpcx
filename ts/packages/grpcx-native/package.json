@@ -1,0 +1,29 @@
+{
+  "name": "@grpcx/native",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "N-API native module — wire format v2 codec for grpcx internal RPC. Hot path lives here; @grpcx/core / @grpcx/transport-* are thin TypeScript shims on top.",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "files": ["lib", "src", "binding.gyp", "prebuilds"],
+  "gypfile": true,
+  "scripts": {
+    "install": "node -e \"process.exit(0)\"",
+    "build": "node-gyp rebuild && tsc -p tsconfig.json",
+    "rebuild": "node-gyp rebuild",
+    "test": "npm run build && node --test test/*.test.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "node-addon-api": "^8.2.0",
+    "node-gyp-build": "^4.8.0"
+  },
+  "devDependencies": {
+    "node-gyp": "^11.0.0"
+  },
+  "license": "Apache-2.0 OR MIT",
+  "publishConfig": {
+    "access": "public"
+  }
+}

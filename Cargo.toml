@@ -27,6 +27,7 @@ members = [
     "crates/grpcx",
     # Comparator harnesses (bench-only, publish = false).
     "comparators/tonic-grpcx",
+    "comparators/internal-rpc",
     "comparators/stones/rust",
 ]
 # cargo-fuzz's per-crate `fuzz/` subdir is a stand-alone package, not a
