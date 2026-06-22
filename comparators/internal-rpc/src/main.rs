@@ -38,6 +38,16 @@ struct Args {
     /// poll_until`). Bypasses SQPOLL + linux_iouring
     /// fallbacks; server thread spins on `WouldBlock`.
     tcpmux_server_busy_poll: bool,
+    /// CPU to pin the server thread to (Linux only; via
+    /// `sched_setaffinity(2)`). `None` = no pin.
+    /// Stabilises `shmem-rtt-busy` bimodal scheduling on
+    /// cloud VMs by forcing producer / consumer onto
+    /// known SMT siblings (e.g. `--pin-server 8
+    /// --pin-client 0` on i7-10700K where cores 0,8 share
+    /// L1 + L2).
+    pin_server: Option<usize>,
+    /// CPU to pin the client thread to. See `pin_server`.
+    pin_client: Option<usize>,
 }
 
 impl Args {
@@ -49,6 +59,8 @@ impl Args {
         let mut output: Option<PathBuf> = None;
         let mut tcpmux_busy_poll_us: u64 = 0;
         let mut tcpmux_server_busy_poll = false;
+        let mut pin_server: Option<usize> = None;
+        let mut pin_client: Option<usize> = None;
 
         let argv: Vec<String> = env::args().skip(1).collect();
         let mut i = 0;
@@ -101,6 +113,24 @@ impl Args {
                     tcpmux_server_busy_poll = true;
                     i += 1;
                 }
+                "--pin-server" => {
+                    pin_server = Some(
+                        argv.get(i + 1)
+                            .expect("--pin-server needs a CPU index")
+                            .parse()
+                            .expect("--pin-server must be a CPU index"),
+                    );
+                    i += 2;
+                }
+                "--pin-client" => {
+                    pin_client = Some(
+                        argv.get(i + 1)
+                            .expect("--pin-client needs a CPU index")
+                            .parse()
+                            .expect("--pin-client must be a CPU index"),
+                    );
+                    i += 2;
+                }
                 "-h" | "--help" => {
                     print_help();
                     std::process::exit(0);
@@ -116,7 +146,39 @@ impl Args {
             output,
             tcpmux_busy_poll_us,
             tcpmux_server_busy_poll,
+            pin_server,
+            pin_client,
         }
+    }
+}
+
+/// Pin the current thread to the given CPU on Linux via
+/// `sched_setaffinity(2)`. No-op on other platforms.
+fn pin_current_thread(cpu: usize) {
+    #[cfg(target_os = "linux")]
+    {
+        unsafe {
+            // cpu_set_t is opaque to us; on glibc it's
+            // 1024 bits = 128 bytes. Use a generous 256-B
+            // buffer to be conservative across libcs.
+            let mut set = [0u8; 256];
+            let byte_idx = cpu / 8;
+            let bit_idx = cpu % 8;
+            if byte_idx < set.len() {
+                set[byte_idx] |= 1 << bit_idx;
+            }
+            unsafe extern "C" {
+                fn sched_setaffinity(pid: i32, cpusetsize: usize, mask: *const u8) -> i32;
+            }
+            let r = sched_setaffinity(0, set.len(), set.as_ptr());
+            if r != 0 {
+                eprintln!("warning: sched_setaffinity({cpu}) failed");
+            }
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = cpu;
     }
 }
 
@@ -317,7 +379,10 @@ fn ephemeral_addr() -> String {
 
 /// Start an in-process Server with a single EchoSvc on a background
 /// thread; returns `(stop_flag, join_handle)`.
-fn spawn_server<F>(serve: F) -> (Arc<AtomicBool>, std::thread::JoinHandle<()>)
+fn spawn_server<F>(
+    serve: F,
+    pin_cpu: Option<usize>,
+) -> (Arc<AtomicBool>, std::thread::JoinHandle<()>)
 where
     F: FnOnce(Server, Arc<AtomicBool>) + Send + 'static,
 {
@@ -325,7 +390,12 @@ where
     let stop_clone = stop.clone();
     let mut server = Server::new();
     server.register(Box::new(EchoSvc));
-    let h = std::thread::spawn(move || serve(server, stop_clone));
+    let h = std::thread::spawn(move || {
+        if let Some(cpu) = pin_cpu {
+            pin_current_thread(cpu);
+        }
+        serve(server, stop_clone);
+    });
     (stop, h)
 }
 
@@ -338,9 +408,15 @@ fn gate_shmem_rtt(args: &Args, busy_poll: bool) -> Stats {
         "shmem-park"
     });
     let sock_clone = sock.clone();
-    let (stop, handle) = spawn_server(move |s, stop| {
-        let _ = s.listen_shmem_until(&sock_clone, &stop);
-    });
+    let (stop, handle) = spawn_server(
+        move |s, stop| {
+            let _ = s.listen_shmem_until(&sock_clone, &stop);
+        },
+        args.pin_server,
+    );
+    if let Some(cpu) = args.pin_client {
+        pin_current_thread(cpu);
+    }
 
     let mut conn = connect_with_retry(|| ShmemConnection::connect(&sock, "bench"));
     // RFC § 8 splits "busy-poll on" vs "park fallback only".
@@ -381,9 +457,15 @@ fn gate_shmem_rtt(args: &Args, busy_poll: bool) -> Stats {
 fn gate_shmem_throughput(args: &Args) -> JsonObj {
     let sock = tmp_path("shmem-thru");
     let sock_clone = sock.clone();
-    let (stop, handle) = spawn_server(move |s, stop| {
-        let _ = s.listen_shmem_busy_poll_until(&sock_clone, &stop);
-    });
+    let (stop, handle) = spawn_server(
+        move |s, stop| {
+            let _ = s.listen_shmem_busy_poll_until(&sock_clone, &stop);
+        },
+        args.pin_server,
+    );
+    if let Some(cpu) = args.pin_client {
+        pin_current_thread(cpu);
+    }
     let mut conn = connect_with_retry(|| ShmemConnection::connect(&sock, "bench"));
     conn.set_busy_poll_unbounded(true);
 
@@ -437,9 +519,15 @@ fn gate_shmem_throughput(args: &Args) -> JsonObj {
 fn gate_uds_rtt(args: &Args) -> Stats {
     let sock = tmp_path("uds");
     let sock_clone = sock.clone();
-    let (stop, handle) = spawn_server(move |s, stop| {
-        let _ = s.listen_uds_until(&sock_clone, &stop);
-    });
+    let (stop, handle) = spawn_server(
+        move |s, stop| {
+            let _ = s.listen_uds_until(&sock_clone, &stop);
+        },
+        args.pin_server,
+    );
+    if let Some(cpu) = args.pin_client {
+        pin_current_thread(cpu);
+    }
     let mut conn = connect_with_retry(|| UdsConnection::connect(&sock, "bench"));
     let body = rng_payload(args.payload);
 
@@ -470,13 +558,19 @@ fn gate_tcpmux_rtt(args: &Args) -> Stats {
     let addr = ephemeral_addr();
     let addr_clone = addr.clone();
     let server_busy_poll = args.tcpmux_server_busy_poll;
-    let (stop, handle) = spawn_server(move |s, stop| {
-        if server_busy_poll {
-            let _ = s.listen_tcp_mux_v2_busy_poll_until(&addr_clone, &stop);
-        } else {
-            let _ = s.listen_tcp_mux_v2_until(&addr_clone, &stop);
-        }
-    });
+    let (stop, handle) = spawn_server(
+        move |s, stop| {
+            if server_busy_poll {
+                let _ = s.listen_tcp_mux_v2_busy_poll_until(&addr_clone, &stop);
+            } else {
+                let _ = s.listen_tcp_mux_v2_until(&addr_clone, &stop);
+            }
+        },
+        args.pin_server,
+    );
+    if let Some(cpu) = args.pin_client {
+        pin_current_thread(cpu);
+    }
     let mut conn = connect_with_retry(|| TcpMuxV2Connection::connect(&addr, "bench"));
     if args.tcpmux_busy_poll_us > 0 {
         conn.set_busy_poll_threshold(std::time::Duration::from_micros(args.tcpmux_busy_poll_us));
