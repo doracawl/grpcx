@@ -152,6 +152,17 @@ export class UdsConnection extends Connection {
     socket.on("error", (err) => this.onClose(err));
   }
 
+  // Note: `socket._handle.onread` override was attempted
+  // (Phase A "A4 net.Socket bypass" technique) but
+  // refuted by measurement on Node v26.3.1 — the
+  // `onread` signature there uses side-channel state via
+  // `streamBaseState[kReadBytesOrError]` rather than the
+  // historical `(nread: number, buf: Buffer | null)`
+  // shape stable through v22. Override wedged the
+  // connection. Documented as Node-version-fragile;
+  // sticking with the EventEmitter `socket.on('data')`
+  // path is the portable choice.
+
   /** Connect to `path` (AF_UNIX socket path). The
    *  `authority` value is reserved for future
    *  vhost-style routing; v1 transports do not consult
